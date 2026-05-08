@@ -1,0 +1,3406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>DREADSPACE — Orbital Siege Command</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --amber: #ffaa33;
+    --amber-bright: #ffcc66;
+    --amber-dim: #8a5a1a;
+    --olive: #4a5d23;
+    --olive-dark: #2a3a14;
+    --red: #ff3344;
+    --green: #66ff88;
+    --steel: #6a7280;
+    --bg: #000;
+    --panel: rgba(8, 12, 6, 0.78);
+    --panel-edge: rgba(255, 170, 51, 0.45);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #000;
+    color: var(--amber);
+    font-family: 'Share Tech Mono', monospace;
+    user-select: none; -webkit-user-select: none;
+    touch-action: none; overscroll-behavior: none;
+  }
+  body { position: fixed; inset: 0; }
+  canvas { position: absolute; inset: 0; display: block; }
+
+  /* ===== HUD overlay ===== */
+  #hud { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+  #hud > * { pointer-events: auto; }
+
+  /* CRT scanlines + vignette */
+  #hud::before {
+    content: ''; position: absolute; inset: 0;
+    background:
+      repeating-linear-gradient(to bottom,
+        rgba(0,0,0,0) 0px,
+        rgba(0,0,0,0) 2px,
+        rgba(0,0,0,0.18) 3px,
+        rgba(0,0,0,0) 4px);
+    pointer-events: none;
+    mix-blend-mode: multiply;
+    z-index: 1;
+  }
+  #hud::after {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
+    pointer-events: none; z-index: 1;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: 2px;
+    box-shadow:
+      0 0 20px rgba(255,170,51,0.10),
+      inset 0 0 30px rgba(255,170,51,0.04);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+  .corner {
+    position: relative;
+  }
+  .corner::before, .corner::after {
+    content: ''; position: absolute; width: 8px; height: 8px;
+    border-color: var(--amber);
+    border-style: solid;
+  }
+  .corner::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+  .corner::after  { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+
+  /* ===== Top status bar ===== */
+  #top-bar {
+    position: absolute; top: env(safe-area-inset-top, 0); left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 10px 12px;
+    gap: 8px;
+    z-index: 12;
+  }
+  #planet-status {
+    flex: 1; max-width: 320px;
+    padding: 8px 12px;
+  }
+  #planet-status .label { font-size: 9px; letter-spacing: 0.18em; color: var(--amber-dim); margin-bottom: 4px; }
+  #planet-status .name { font-family: 'Black Ops One', sans-serif; font-size: 16px; color: var(--amber-bright); letter-spacing: 0.1em; line-height: 1; }
+  #planet-status .level { font-size: 10px; color: var(--amber); margin-top: 2px; letter-spacing: 0.15em; }
+  #hp-bar {
+    margin-top: 8px; height: 10px; width: 100%;
+    background: rgba(0,0,0,0.6); border: 1px solid var(--amber-dim);
+    position: relative; overflow: hidden;
+  }
+  #hp-fill {
+    height: 100%; width: 100%;
+    background: linear-gradient(90deg, #ff3344 0%, #ff8833 50%, #ffcc44 100%);
+    transition: width 0.18s ease-out;
+    box-shadow: 0 0 8px rgba(255,80,40,0.6);
+  }
+  #hp-text { font-size: 9px; margin-top: 3px; color: var(--amber); letter-spacing: 0.1em; }
+
+  #right-stats {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+  }
+  .stat-pill {
+    padding: 6px 10px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; letter-spacing: 0.12em;
+    min-width: 110px; justify-content: space-between;
+  }
+  .stat-pill .label { font-size: 9px; color: var(--amber-dim); }
+  .stat-pill .val { font-family: 'Black Ops One', sans-serif; color: var(--amber-bright); font-size: 14px; }
+  #pause-btn {
+    width: 38px; height: 38px;
+    background: var(--panel); border: 1px solid var(--panel-edge);
+    color: var(--amber); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; padding: 0;
+  }
+  #pause-btn:active { background: rgba(255,170,51,0.15); }
+
+  /* ===== Build button ===== */
+  #build-btn {
+    position: absolute;
+    bottom: calc(env(safe-area-inset-bottom, 0) + 14px);
+    left: 50%; transform: translateX(-50%);
+    padding: 10px 22px;
+    background: linear-gradient(180deg, rgba(74,93,35,0.85), rgba(42,58,20,0.92));
+    border: 1px solid var(--amber);
+    color: var(--amber-bright);
+    font-family: 'Black Ops One', sans-serif;
+    font-size: 14px; letter-spacing: 0.18em;
+    cursor: pointer; z-index: 12;
+    box-shadow:
+      0 0 20px rgba(255,170,51,0.25),
+      inset 0 0 12px rgba(0,0,0,0.4);
+  }
+  #build-btn:active { transform: translateX(-50%) scale(0.96); background: rgba(255,170,51,0.2); }
+
+  /* ===== Thumbsticks ===== */
+  .stick-zone {
+    position: absolute;
+    bottom: calc(env(safe-area-inset-bottom, 0) + 70px);
+    width: 130px; height: 130px;
+    z-index: 11;
+    touch-action: none;
+  }
+  #stick-left { left: 14px; }
+  #stick-right { right: 14px; }
+  .stick-base {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    border: 1px dashed rgba(255,170,51,0.3);
+    background: radial-gradient(circle, rgba(255,170,51,0.05), rgba(0,0,0,0.3));
+    opacity: 0.6;
+    pointer-events: none;
+  }
+  .stick-knob {
+    position: absolute; top: 50%; left: 50%;
+    width: 56px; height: 56px;
+    margin: -28px 0 0 -28px;
+    border-radius: 50%;
+    border: 1px solid var(--amber);
+    background: radial-gradient(circle at 30% 30%, rgba(255,200,80,0.4), rgba(255,170,51,0.12) 60%, rgba(0,0,0,0.5));
+    box-shadow: 0 0 12px rgba(255,170,51,0.4), inset 0 0 8px rgba(0,0,0,0.5);
+    pointer-events: none;
+    transition: transform 0.05s linear;
+  }
+  .stick-label {
+    position: absolute; top: -18px; left: 50%; transform: translateX(-50%);
+    font-size: 9px; color: var(--amber-dim);
+    letter-spacing: 0.2em; white-space: nowrap;
+    pointer-events: none;
+  }
+
+  /* ===== Build menu modal ===== */
+  .modal-overlay {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: none; align-items: center; justify-content: center;
+    z-index: 30; padding: 20px;
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    width: 100%; max-width: 420px; max-height: 90vh; overflow-y: auto;
+    padding: 16px;
+  }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 14px; padding-bottom: 10px;
+    border-bottom: 1px solid var(--amber-dim);
+  }
+  .modal-title {
+    font-family: 'Black Ops One', sans-serif;
+    font-size: 18px; color: var(--amber-bright); letter-spacing: 0.15em;
+  }
+  .close-btn {
+    background: transparent; border: 1px solid var(--amber-dim);
+    color: var(--amber); width: 32px; height: 32px;
+    cursor: pointer; font-size: 16px;
+  }
+
+  .ship-card {
+    margin-bottom: 10px; padding: 10px 12px;
+    border: 1px solid rgba(255,170,51,0.25);
+    background: rgba(20,16,8,0.5);
+    display: flex; gap: 12px; align-items: center;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .ship-card:active { background: rgba(255,170,51,0.1); }
+  .ship-card.locked { opacity: 0.45; cursor: not-allowed; }
+  .ship-card.affordable { border-color: var(--amber); box-shadow: inset 0 0 10px rgba(255,170,51,0.08); }
+  .ship-icon {
+    flex-shrink: 0;
+    width: 56px; height: 36px;
+    background: linear-gradient(135deg, var(--olive), var(--olive-dark));
+    border: 1px solid var(--amber-dim);
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Black Ops One', sans-serif; font-size: 9px;
+    color: var(--amber-bright); letter-spacing: 0.1em;
+  }
+  .ship-info { flex: 1; min-width: 0; }
+  .ship-name { font-family: 'Black Ops One', sans-serif; font-size: 13px; color: var(--amber-bright); letter-spacing: 0.12em; }
+  .ship-stats { font-size: 10px; color: var(--amber-dim); margin-top: 3px; letter-spacing: 0.06em; }
+  .ship-cost { flex-shrink: 0; text-align: right; }
+  .ship-cost .num { font-family: 'Black Ops One', sans-serif; font-size: 14px; color: var(--amber-bright); }
+  .ship-cost .lbl { font-size: 9px; color: var(--amber-dim); letter-spacing: 0.1em; }
+
+  /* ===== Boot/title screen ===== */
+  #boot {
+    position: absolute; inset: 0;
+    background: #000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 50;
+    text-align: center; padding: 20px;
+  }
+  #boot h1 {
+    font-family: 'Black Ops One', sans-serif;
+    font-size: clamp(36px, 9vw, 72px);
+    letter-spacing: 0.18em;
+    color: var(--amber-bright);
+    text-shadow:
+      0 0 20px rgba(255,170,51,0.6),
+      0 0 40px rgba(255,80,20,0.3);
+    margin-bottom: 8px;
+  }
+  #boot .subtitle {
+    font-size: 11px; color: var(--amber-dim);
+    letter-spacing: 0.3em; margin-bottom: 30px;
+  }
+  #boot .terminal {
+    font-size: 11px; color: var(--green);
+    letter-spacing: 0.06em;
+    text-align: left; margin-bottom: 30px;
+    max-width: 320px; min-height: 80px;
+  }
+  #boot .terminal .line { opacity: 0; animation: lineIn 0.4s forwards; }
+  @keyframes lineIn { to { opacity: 1; } }
+  #start-btn {
+    padding: 14px 36px;
+    background: linear-gradient(180deg, rgba(74,93,35,0.95), rgba(42,58,20,0.95));
+    border: 1px solid var(--amber);
+    color: var(--amber-bright);
+    font-family: 'Black Ops One', sans-serif;
+    font-size: 16px; letter-spacing: 0.2em;
+    cursor: pointer;
+    box-shadow: 0 0 24px rgba(255,170,51,0.4);
+    animation: pulseBtn 2s ease-in-out infinite;
+  }
+  #start-btn:disabled {
+    cursor: wait;
+    opacity: 0.55;
+    animation: none;
+    box-shadow: none;
+    border-color: rgba(255,170,51,0.3);
+    color: rgba(255,170,51,0.7);
+  }
+  @keyframes pulseBtn {
+    0%, 100% { box-shadow: 0 0 24px rgba(255,170,51,0.4); }
+    50%      { box-shadow: 0 0 36px rgba(255,170,51,0.7); }
+  }
+
+  /* ===== Ship inspect card (floating, screen-space) ===== */
+  #ship-card {
+    position: absolute;
+    z-index: 30;
+    width: 220px;
+    background: rgba(8, 12, 6, 0.92);
+    border: 1px solid var(--amber);
+    box-shadow: 0 0 22px rgba(255,170,51,0.35), inset 0 0 14px rgba(255,170,51,0.08);
+    padding: 12px 14px 10px;
+    color: var(--amber-bright);
+    font-size: 11px; letter-spacing: 0.06em;
+    pointer-events: auto;
+    display: none;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    transform: translate(-50%, -100%);  /* anchored above ship */
+  }
+  #ship-card.show { display: block; animation: cardIn 0.2s ease-out; }
+  @keyframes cardIn { from { opacity:0; transform: translate(-50%, -90%); } to { opacity:1; transform: translate(-50%, -100%); } }
+  #ship-card-close {
+    position: absolute; top: 4px; right: 6px;
+    background: none; border: none; color: var(--amber-dim);
+    font-size: 14px; cursor: pointer; padding: 2px 6px;
+  }
+  #ship-card-close:active { color: var(--amber-bright); }
+  #ship-card .card-code {
+    font-family: 'Black Ops One', sans-serif;
+    font-size: 10px; letter-spacing: 0.18em;
+    color: var(--amber-dim);
+  }
+  #ship-card .card-name {
+    font-family: 'Black Ops One', sans-serif;
+    font-size: 16px; letter-spacing: 0.12em;
+    color: var(--amber-bright);
+    margin-bottom: 8px;
+  }
+  #ship-card .card-row {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 8px;
+  }
+  #ship-card .card-lbl {
+    font-size: 9px; letter-spacing: 0.12em;
+    color: var(--amber-dim);
+    width: 32px;
+  }
+  #ship-card .card-bar {
+    flex: 1; height: 8px;
+    background: rgba(255,170,51,0.1);
+    border: 1px solid var(--amber-dim);
+    overflow: hidden;
+  }
+  #ship-card .card-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--amber), #ffcc66);
+    transition: width 0.25s;
+  }
+  #ship-card .card-num {
+    font-size: 9px; color: var(--amber-bright);
+    min-width: 56px; text-align: right;
+  }
+  #ship-card .card-stats {
+    font-size: 10px; color: var(--amber-dim);
+    line-height: 1.6; margin-bottom: 10px;
+    border-top: 1px solid rgba(255,170,51,0.2);
+    padding-top: 6px;
+  }
+  #ship-card .card-stats span {
+    color: var(--amber-bright);
+  }
+  #ship-card-bridge {
+    width: 100%;
+    padding: 8px;
+    background: linear-gradient(180deg, rgba(74,93,35,0.6), rgba(42,58,20,0.6));
+    border: 1px solid var(--amber);
+    color: var(--amber-bright);
+    font-family: 'Black Ops One', sans-serif;
+    font-size: 11px; letter-spacing: 0.18em;
+    cursor: pointer;
+  }
+  #ship-card-bridge:active { background: rgba(255,170,51,0.2); }
+
+  /* ===== Bridge view UI ===== */
+  #exit-bridge-btn {
+    position: absolute;
+    top: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 35;
+    padding: 10px 22px;
+    background: rgba(8, 12, 6, 0.92);
+    border: 1px solid var(--amber);
+    color: var(--amber-bright);
+    font-family: 'Black Ops One', sans-serif;
+    font-size: 11px; letter-spacing: 0.2em;
+    box-shadow: 0 0 18px rgba(255,170,51,0.4);
+    cursor: pointer;
+    display: none;
+  }
+  #exit-bridge-btn.show { display: block; }
+  #exit-bridge-btn:active { background: rgba(255,170,51,0.15); }
+  #bridge-marker {
+    position: absolute;
+    bottom: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 35;
+    color: var(--amber);
+    font-family: 'Black Ops One', sans-serif;
+    font-size: 10px; letter-spacing: 0.3em;
+    text-shadow: 0 0 12px rgba(255,170,51,0.6);
+    display: none;
+    animation: pulseFade 2s ease-in-out infinite;
+  }
+  #bridge-marker.show { display: block; }
+  @keyframes pulseFade {
+    0%, 100% { opacity: 0.45; }
+    50%      { opacity: 1.0; }
+  }
+
+  /* ===== Pause overlay ===== */
+  #pause-overlay {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 40; gap: 14px;
+    backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  }
+  #pause-overlay.show { display: flex; }
+  #pause-overlay h2 {
+    font-family: 'Black Ops One', sans-serif; font-size: 36px;
+    color: var(--amber-bright); letter-spacing: 0.25em;
+    text-shadow: 0 0 20px rgba(255,170,51,0.6);
+  }
+  #pause-overlay button {
+    padding: 10px 28px; min-width: 160px;
+    background: var(--panel); border: 1px solid var(--amber);
+    color: var(--amber-bright); font-family: 'Black Ops One', sans-serif;
+    font-size: 13px; letter-spacing: 0.18em; cursor: pointer;
+  }
+  #pause-overlay button:active { background: rgba(255,170,51,0.2); }
+
+  /* ===== Toast notifications ===== */
+  #toasts {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0) + 90px);
+    left: 50%; transform: translateX(-50%);
+    z-index: 25; pointer-events: none;
+    display: flex; flex-direction: column; gap: 4px; align-items: center;
+  }
+  .toast {
+    padding: 6px 14px;
+    background: rgba(0,0,0,0.7); border: 1px solid var(--amber-dim);
+    color: var(--amber-bright);
+    font-size: 11px; letter-spacing: 0.15em;
+    animation: toastIn 0.3s ease-out, toastOut 0.4s ease-in 1.6s forwards;
+  }
+  .toast.warn { border-color: var(--red); color: var(--red); }
+  .toast.good { border-color: var(--green); color: var(--green); }
+  @keyframes toastIn  { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes toastOut { to   { opacity: 0; transform: translateY(-8px); } }
+
+  /* Hide stick UI on non-touch devices */
+  @media (hover: hover) and (pointer: fine) {
+    .stick-zone { display: none; }
+  }
+
+  /* Compact for small screens */
+  @media (max-height: 600px) {
+    .stick-zone { width: 110px; height: 110px; bottom: calc(env(safe-area-inset-bottom, 0) + 50px); }
+    .stick-knob { width: 46px; height: 46px; margin: -23px 0 0 -23px; }
+    #build-btn { bottom: calc(env(safe-area-inset-bottom, 0) + 8px); padding: 8px 18px; font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<!-- HUD overlay -->
+<div id="hud">
+  <div id="top-bar">
+    <div id="planet-status" class="panel corner">
+      <div class="label">TARGET // ORBITAL CONTACT</div>
+      <div class="name" id="planet-name">KEPLER-7B</div>
+      <div class="level" id="planet-level">SECTOR 01</div>
+      <div id="hp-bar"><div id="hp-fill"></div></div>
+      <div id="hp-text">INTEGRITY: 100%</div>
+    </div>
+    <div id="right-stats">
+      <div class="stat-pill panel corner">
+        <span class="label">SCRAP</span><span class="val" id="resource-val">100</span>
+      </div>
+      <div class="stat-pill panel corner">
+        <span class="label">FLEET</span><span class="val" id="fleet-val">0</span>
+      </div>
+      <button id="pause-btn" class="corner" aria-label="Pause">II</button>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <button id="build-btn">⚒ COMMISSION VESSEL</button>
+
+  <div id="stick-left" class="stick-zone">
+    <div class="stick-label">ORBIT</div>
+    <div class="stick-base"></div>
+    <div class="stick-knob"></div>
+  </div>
+  <div id="stick-right" class="stick-zone">
+    <div class="stick-label">RANGE / TILT</div>
+    <div class="stick-base"></div>
+    <div class="stick-knob"></div>
+  </div>
+</div>
+
+<!-- Build menu -->
+<div id="build-modal" class="modal-overlay">
+  <div class="modal panel corner">
+    <div class="modal-header">
+      <div class="modal-title">SHIPYARD // ORDNANCE</div>
+      <button class="close-btn" id="close-build">✕</button>
+    </div>
+    <div id="ship-list"></div>
+  </div>
+</div>
+
+<!-- Pause -->
+<div id="pause-overlay">
+  <h2>// PAUSED //</h2>
+  <button id="resume-btn">RESUME</button>
+  <button id="restart-btn">RESTART CAMPAIGN</button>
+</div>
+
+<!-- Ship inspect card (floats in screen-space near tapped ship) -->
+<div id="ship-card">
+  <button id="ship-card-close" aria-label="Close">✕</button>
+  <div class="card-code" id="ship-card-code">CR-1</div>
+  <div class="card-name" id="ship-card-name">CRUISER</div>
+  <div class="card-row">
+    <span class="card-lbl">HULL</span>
+    <div class="card-bar"><div class="card-fill" id="ship-card-hp"></div></div>
+    <span class="card-num" id="ship-card-hp-num">220/220</span>
+  </div>
+  <div class="card-stats" id="ship-card-stats"></div>
+  <button id="ship-card-bridge">▣ VIEW FROM BRIDGE</button>
+</div>
+
+<!-- Bridge view exit -->
+<button id="exit-bridge-btn">↩ EXIT BRIDGE</button>
+<div id="bridge-marker">// BRIDGE VIEW //</div>
+
+<!-- Boot screen -->
+<div id="boot">
+  <h1>DREADSPACE</h1>
+  <div class="subtitle">// ORBITAL SIEGE COMMAND //</div>
+  <div class="terminal" id="terminal"></div>
+  <button id="start-btn">▶ INITIATE ASSAULT</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
+<script>
+'use strict';
+
+/* ============================================================
+ * DREADSPACE — Orbital Siege Command
+ * Single-file HTML5 / Three.js space combat game
+ * ============================================================ */
+
+const TAU = Math.PI * 2;
+const lerp = (a,b,t) => a + (b-a)*t;
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const rand = (a,b) => a + Math.random()*(b-a);
+const randSign = () => Math.random() < 0.5 ? -1 : 1;
+
+/* ============================================================
+ * AUDIO ENGINE — fully procedural Web Audio synth
+ * ============================================================ */
+class AudioEngine {
+  constructor() {
+    this.ctx = null;
+    this.master = null;
+    this.muted = false;
+    this.lastBoom = 0;
+    // Sample storage. We pre-fetch the bytes early; decode happens after AudioContext exists.
+    this._samples = {};                 // { name: AudioBuffer }
+    this._sampleArrayBuffers = {};      // { name: ArrayBuffer } — pending decode
+  }
+
+  // Fetch sample bytes early. Safe to call before init() — bytes are buffered, not decoded yet.
+  preloadSamples(urls) {
+    Object.entries(urls).forEach(([name, url]) => {
+      fetch(url)
+        .then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`)))
+        .then(ab => {
+          this._sampleArrayBuffers[name] = ab;
+          // If AudioContext already exists (rare ordering), decode immediately
+          if (this.ctx && !this._samples[name]) this._decodeOne(name);
+        })
+        .catch(err => console.warn(`Audio sample load failed: ${url}`, err));
+    });
+  }
+
+  async _decodeOne(name) {
+    const ab = this._sampleArrayBuffers[name];
+    if (!ab) return;
+    try {
+      // .slice(0) clones — decodeAudioData detaches its input on some browsers
+      this._samples[name] = await this.ctx.decodeAudioData(ab.slice(0));
+    } catch (e) {
+      console.warn(`Audio decode failed: ${name}`, e);
+    }
+  }
+
+  _decodeAllPending() {
+    Object.keys(this._sampleArrayBuffers).forEach(name => {
+      if (!this._samples[name]) this._decodeOne(name);
+    });
+  }
+
+  init() {
+    if (this.ctx) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    this.ctx = new Ctx();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0.55;
+    this.master.connect(this.ctx.destination);
+    this._startAmbient();
+    this._decodeAllPending();
+  }
+  resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
+
+  // Play a portion of a loaded sample. offset = where in the buffer to start (sec).
+  // duration = how long to play (sec). Returns a handle so caller can stop/fade if needed.
+  playSample(name, { offset = 0, duration = null, gain = 1.0, rate = 1.0 } = {}) {
+    if (!this.ctx || this.muted || !this._samples[name]) return null;
+    const t = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this._samples[name];
+    src.playbackRate.value = rate;
+    const g = this.ctx.createGain();
+    g.gain.value = gain;
+    src.connect(g); g.connect(this.master);
+    if (duration != null) src.start(t, offset, duration);
+    else                  src.start(t, offset);
+    return { src, gain: g, ctx: this.ctx };
+  }
+
+  _startAmbient() {
+    const ctx = this.ctx;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 42;
+    filter.type = 'lowpass';
+    filter.frequency.value = 110;
+    gain.gain.value = 0.05;
+    osc.connect(filter); filter.connect(gain); gain.connect(this.master);
+    osc.start();
+    // Slow LFO on filter
+    const lfo = ctx.createOscillator();
+    const lfoGain = ctx.createGain();
+    lfo.frequency.value = 0.07;
+    lfoGain.gain.value = 30;
+    lfo.connect(lfoGain); lfoGain.connect(filter.frequency);
+    lfo.start();
+  }
+
+  _noiseBuffer(seconds = 1) {
+    const sr = this.ctx.sampleRate;
+    const buf = this.ctx.createBuffer(1, sr*seconds, sr);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random()*2 - 1;
+    return buf;
+  }
+
+  // Big cannon boom — uses the cannon.mp3 sample if loaded, with tier-aware processing:
+  // pitch-down (deeper), low-shelf boost (deeper), high-shelf nudge (sharper),
+  // gain boost (louder), plus a parallel sub-bass thump for heavies (the felt kick).
+  // Falls back to the multi-layer synth if the sample hasn't decoded yet.
+  cannon(strength = 1, tier = 1) {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    if (t - this.lastBoom < 0.015) return;
+    this.lastBoom = t;
+
+    if (this._samples.cannon) {
+      this._cannonSample(t, strength, tier);
+    } else {
+      this._cannonSynth(t, strength, tier);
+    }
+  }
+
+  _cannonSample(t, strength, tier) {
+    // Per-tier processing recipe.
+    // rate < 1 = pitched down (deeper, longer). shelfLow boosts <200Hz body.
+    // shelfHi nudges 4kHz+ for transient sharpness. sub adds a parallel sine kick.
+    const cfg = ({
+      1: { rate: 1.00, gain: 0.85, shelfLow: 0,  shelfHi: 0,  sub: 0,    subFreq: 60, subLen: 0.20 },
+      2: { rate: 0.96, gain: 1.00, shelfLow: 3,  shelfHi: 1,  sub: 0,    subFreq: 55, subLen: 0.22 },
+      3: { rate: 0.84, gain: 1.30, shelfLow: 7,  shelfHi: 3,  sub: 0.65, subFreq: 45, subLen: 0.36 },
+      4: { rate: 0.74, gain: 1.55, shelfLow: 10, shelfHi: 4,  sub: 0.95, subFreq: 36, subLen: 0.55 },
+    })[tier] || { rate: 1.0, gain: 0.85, shelfLow: 0, shelfHi: 0, sub: 0, subFreq: 60, subLen: 0 };
+
+    // ---- Main sample with EQ chain ----
+    const src = this.ctx.createBufferSource();
+    src.buffer = this._samples.cannon;
+    src.playbackRate.value = cfg.rate;
+
+    const lowShelf = this.ctx.createBiquadFilter();
+    lowShelf.type = 'lowshelf';
+    lowShelf.frequency.value = 200;
+    lowShelf.gain.value = cfg.shelfLow;
+
+    const highShelf = this.ctx.createBiquadFilter();
+    highShelf.type = 'highshelf';
+    highShelf.frequency.value = 3500;
+    highShelf.gain.value = cfg.shelfHi;
+
+    const gain = this.ctx.createGain();
+    gain.gain.value = cfg.gain * strength;
+
+    src.connect(lowShelf);
+    lowShelf.connect(highShelf);
+    highShelf.connect(gain);
+    gain.connect(this.master);
+    src.start(t);
+
+    // ---- Parallel sub-bass kick (heavies only) ----
+    // Adds the felt, chest-thump low end that mp3 mid-fi recordings often lack.
+    if (cfg.sub > 0) {
+      const osc = this.ctx.createOscillator();
+      const og = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(cfg.subFreq, t);
+      osc.frequency.exponentialRampToValueAtTime(20, t + cfg.subLen);
+      og.gain.setValueAtTime(0.0001, t);
+      og.gain.exponentialRampToValueAtTime(cfg.sub * strength, t + 0.008);
+      og.gain.exponentialRampToValueAtTime(0.0001, t + cfg.subLen);
+      osc.connect(og);
+      og.connect(this.master);
+      osc.start(t);
+      osc.stop(t + cfg.subLen + 0.05);
+    }
+  }
+
+  _cannonSynth(t, strength, tier) {
+    // Multi-layer synth fallback (used while cannon.mp3 is still decoding, or if missing).
+    const tierBoost = 1 + (tier - 1) * 0.18;
+    const amp = strength * tierBoost;
+
+    // ---- Layer 1: sub-bass thump (the felt punch) ----
+    {
+      const osc = this.ctx.createOscillator();
+      const og = this.ctx.createGain();
+      osc.type = 'sine';
+      const startF = 220 - tier * 25;
+      osc.frequency.setValueAtTime(startF, t);
+      osc.frequency.exponentialRampToValueAtTime(28, t + 0.22 + tier * 0.04);
+      og.gain.setValueAtTime(0.0001, t);
+      og.gain.exponentialRampToValueAtTime(0.85 * amp, t + 0.005);
+      og.gain.exponentialRampToValueAtTime(0.0001, t + 0.40 + tier * 0.05);
+      osc.connect(og); og.connect(this.master);
+      osc.start(t); osc.stop(t + 0.5 + tier * 0.06);
+    }
+
+    // ---- Layer 2: muzzle crack (filtered noise burst) ----
+    {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = this._noiseBuffer(0.35);
+      const f1 = this.ctx.createBiquadFilter();
+      f1.type = 'bandpass';
+      f1.frequency.setValueAtTime(2000 - tier * 200, t);
+      f1.frequency.exponentialRampToValueAtTime(400, t + 0.15);
+      f1.Q.value = 0.6;
+      const ng = this.ctx.createGain();
+      ng.gain.setValueAtTime(0.55 * amp, t);
+      ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+      noise.connect(f1); f1.connect(ng); ng.connect(this.master);
+      noise.start(t);
+    }
+
+    // ---- Layer 3: low-mid body ----
+    {
+      const osc = this.ctx.createOscillator();
+      const og = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(110, t);
+      osc.frequency.exponentialRampToValueAtTime(55, t + 0.18);
+      og.gain.setValueAtTime(0.0001, t);
+      og.gain.exponentialRampToValueAtTime(0.35 * amp, t + 0.008);
+      og.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+      osc.connect(og); og.connect(this.master);
+      osc.start(t); osc.stop(t + 0.35);
+    }
+
+    // ---- Layer 4: shell whistle for heavies ----
+    if (tier >= 3) {
+      const osc = this.ctx.createOscillator();
+      const og = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(900, t + 0.05);
+      osc.frequency.exponentialRampToValueAtTime(450, t + 0.55);
+      og.gain.setValueAtTime(0.0001, t + 0.05);
+      og.gain.exponentialRampToValueAtTime(0.08 * amp, t + 0.10);
+      og.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+      osc.connect(og); og.connect(this.master);
+      osc.start(t + 0.05); osc.stop(t + 0.65);
+    }
+  }
+
+  // Volley fire — for big ships. Plays a bigger cannon for the "anchor" gun
+  // then several quick echoes simulating the multi-barrel salvo.
+  volley(tier = 4) {
+    this.cannon(1.4, tier);
+  }
+
+  // Smaller defense turret pop
+  turret() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(420, t);
+    osc.frequency.exponentialRampToValueAtTime(120, t + 0.08);
+    gain.gain.setValueAtTime(0.18, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    osc.connect(gain); gain.connect(this.master);
+    osc.start(t); osc.stop(t + 0.15);
+  }
+
+  // Shell impact — heavy thud + dirt-splash. Used for ship shots hitting planet.
+  hit(big = false) {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    // Sub-thud
+    {
+      const osc = this.ctx.createOscillator();
+      const og = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(140, t);
+      osc.frequency.exponentialRampToValueAtTime(35, t + 0.18);
+      og.gain.setValueAtTime(0.0001, t);
+      og.gain.exponentialRampToValueAtTime(big ? 0.6 : 0.35, t + 0.005);
+      og.gain.exponentialRampToValueAtTime(0.0001, t + 0.30);
+      osc.connect(og); og.connect(this.master);
+      osc.start(t); osc.stop(t + 0.35);
+    }
+    // Dirt/debris splash
+    {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = this._noiseBuffer(0.20);
+      const f = this.ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.setValueAtTime(1800, t);
+      f.frequency.exponentialRampToValueAtTime(300, t + 0.18);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(big ? 0.5 : 0.28, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.20);
+      noise.connect(f); f.connect(g); g.connect(this.master);
+      noise.start(t);
+    }
+  }
+
+  // Defense-turret hit on a ship — sharper, metal sparks.
+  shipHit() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = this._noiseBuffer(0.16);
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'bandpass'; f.frequency.value = 3200; f.Q.value = 1.8;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.20, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    noise.connect(f); f.connect(g); g.connect(this.master);
+    noise.start(t);
+    // Plus a small low thump
+    const osc = this.ctx.createOscillator();
+    const og = this.ctx.createGain();
+    osc.type = 'sine'; osc.frequency.value = 220;
+    og.gain.setValueAtTime(0.18, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.10);
+    osc.connect(og); og.connect(this.master);
+    osc.start(t); osc.stop(t + 0.12);
+  }
+
+  explosion(big = false) {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    if (this._samples.explosion) {
+      this._explosionSample(t, big);
+    } else {
+      this._explosionSynth(t, big);
+    }
+  }
+
+  _explosionSample(t, big) {
+    // Main sample
+    const src = this.ctx.createBufferSource();
+    src.buffer = this._samples.explosion;
+    src.playbackRate.value = big ? 0.78 : 1.0;       // pitch down for big explosions = bigger feel
+    const lowShelf = this.ctx.createBiquadFilter();
+    lowShelf.type = 'lowshelf';
+    lowShelf.frequency.value = 180;
+    lowShelf.gain.value = big ? 8 : 2;
+    const gain = this.ctx.createGain();
+    gain.gain.value = big ? 1.4 : 0.85;
+    src.connect(lowShelf); lowShelf.connect(gain); gain.connect(this.master);
+    src.start(t);
+
+    // Parallel sub-bass kick — gives big explosions the felt "WHUMP"
+    if (big) {
+      const osc = this.ctx.createOscillator();
+      const og = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(70, t);
+      osc.frequency.exponentialRampToValueAtTime(22, t + 0.55);
+      og.gain.setValueAtTime(0.0001, t);
+      og.gain.exponentialRampToValueAtTime(0.85, t + 0.012);
+      og.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+      osc.connect(og); og.connect(this.master);
+      osc.start(t); osc.stop(t + 0.7);
+    }
+  }
+
+  _explosionSynth(t, big) {
+    const dur = big ? 0.9 : 0.45;
+    // Sub thud
+    const osc = this.ctx.createOscillator();
+    const og = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(big ? 90 : 130, t);
+    osc.frequency.exponentialRampToValueAtTime(25, t + dur*0.6);
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(big ? 1.0 : 0.55, t + 0.01);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(og); og.connect(this.master);
+    osc.start(t); osc.stop(t + dur + 0.05);
+    // Noise blast
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = this._noiseBuffer(dur);
+    const nf = this.ctx.createBiquadFilter();
+    nf.type = 'lowpass';
+    nf.frequency.setValueAtTime(big ? 3000 : 1800, t);
+    nf.frequency.exponentialRampToValueAtTime(120, t + dur);
+    const ng = this.ctx.createGain();
+    ng.gain.setValueAtTime(big ? 0.7 : 0.4, t);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    noise.connect(nf); nf.connect(ng); ng.connect(this.master);
+    noise.start(t);
+  }
+
+  ui(freq = 880) {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'triangle'; osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.18, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    osc.connect(g); g.connect(this.master);
+    osc.start(t); osc.stop(t + 0.15);
+  }
+
+  victoryFanfare() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const notes = [330, 415, 494, 660];
+    notes.forEach((f, i) => {
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      osc.type = 'sawtooth'; osc.frequency.value = f;
+      const startT = t + i*0.12;
+      g.gain.setValueAtTime(0.0001, startT);
+      g.gain.exponentialRampToValueAtTime(0.22, startT + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, startT + 0.5);
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass'; filter.frequency.value = 1500;
+      osc.connect(filter); filter.connect(g); g.connect(this.master);
+      osc.start(startT); osc.stop(startT + 0.55);
+    });
+  }
+}
+
+/* ============================================================
+ * SHIP TIER SPECS
+ * ============================================================ */
+const SHIP_TIERS = {
+  cruiser: {
+    id: 'cruiser', name: 'CRUISER', code: 'CR-1',
+    cost: 100, hull: 220, dps: 8, range: 22, fireRate: 1.2,
+    length: 2.0, width: 0.6, height: 0.35,
+    turrets: 1, barrels: 2,
+    color: 0x6a7a4a, accent: 0x3a4a1a, panelColor: 0x2a3a5a,
+    orbitR: 13, orbitSpeed: 0.18,
+    fireMode: 'continuous',
+    desc: 'Light recon hull. Fast.'
+  },
+  destroyer: {
+    id: 'destroyer', name: 'DESTROYER', code: 'DD-2',
+    cost: 450, hull: 750, dps: 22, range: 24, fireRate: 1.0,
+    length: 3.2, width: 0.85, height: 0.5,
+    turrets: 2, barrels: 2,
+    color: 0x5a6a3a, accent: 0x2a3a0a, panelColor: 0x223060,
+    orbitR: 14.5, orbitSpeed: 0.13,
+    fireMode: 'continuous',
+    desc: 'Balanced line vessel.'
+  },
+  battleship: {
+    id: 'battleship', name: 'BATTLESHIP', code: 'BB-3',
+    cost: 1800, hull: 2800, dps: 70, range: 28, fireRate: 0.7,
+    length: 5.2, width: 1.2, height: 0.8,
+    turrets: 3, barrels: 3,
+    color: 0x4a5530, accent: 0x1a2510, panelColor: 0x1a2858,
+    orbitR: 16, orbitSpeed: 0.09,
+    fireMode: 'volley',
+    volleyInterval: 6.5,   // sec between volleys
+    volleySpread: 0.45,    // sec across which all guns fire (sequential, not simultaneous)
+    desc: 'Heavy gunnery platform. Fires in 9-gun volleys.'
+  },
+  dreadnought: {
+    id: 'dreadnought', name: 'DREADNOUGHT', code: 'DN-4',
+    cost: 8000, hull: 11000, dps: 240, range: 32, fireRate: 0.55,
+    length: 8.0, width: 1.8, height: 1.2,
+    turrets: 4, barrels: 3,
+    color: 0x3a4525, accent: 0x101808, panelColor: 0x122050,
+    orbitR: 18, orbitSpeed: 0.06,
+    fireMode: 'volley',
+    volleyInterval: 8.5,
+    volleySpread: 0.6,
+    desc: 'Capital-class siege engine. 12-gun broadsides.'
+  }
+};
+
+/* ============================================================
+ * MAIN GAME CLASS
+ * ============================================================ */
+class Game {
+  static _shipIdCounter = 0;
+  constructor() {
+    this.audio = new AudioEngine();
+    this.canvas = document.getElementById('scene');
+    this.clock = new THREE.Clock();
+    this.running = false;
+    this.paused = false;
+    this.gameTime = 0;
+
+    // Game state
+    this.state = {
+      resources: 280,
+      planetLevel: 1,
+      planetHP: 1000,
+      planetMaxHP: 1000,
+      fleet: 0,
+      planetsDestroyed: 0,
+    };
+
+    // Entity arrays
+    this.ships = [];          // player attacker ships
+    this.turrets = [];        // planet defense turrets
+    this.projectiles = [];    // both directions
+    this.particles = [];      // explosion sprites
+    this.debris = [];         // floating wreckage
+
+    // Camera state (orbital)
+    this.camState = {
+      azimuth: 0.4,
+      elevation: 0.25,
+      distance: 28,
+      targetDistance: 28,
+      tilt: 0,
+    };
+    this.cameraMode = 'orbit';   // 'orbit' or 'bridge'
+    this.bridgeShip = null;
+    this.selectedShip = null;
+    this._shakeAmount = 0;
+
+    // Warp sequence — drives the planet-to-planet transition cinematic.
+    this.warpState = 'idle';     // 'idle' | 'aftermath' | 'charging' | 'jump' | 'tunnel' | 'arriving'
+    this.warpTimer = 0;
+    this._warpAxis = new THREE.Vector3(0, 0, -1);
+    this._warpStartCam = null;   // saved orbital cam state at warp start
+    this.chunks = [];            // planet debris
+    this._warpFlashEl = null;    // DOM full-screen flash element (created lazily)
+
+    // Input state
+    this.input = {
+      stickL: { x: 0, y: 0, active: false, id: null },
+      stickR: { x: 0, y: 0, active: false, id: null },
+      mouseDown: false,
+      lastMouseX: 0, lastMouseY: 0,
+      keys: {},
+    };
+
+    this._initScene();
+    this._initInput();
+    this._initUI();
+    this._buildShipMenu();
+    this._preloadShipModels();
+    // Fetch audio samples in parallel with ship models. Bytes get buffered now;
+    // they'll decode the moment the AudioContext is created (on START button click).
+    this.audio.preloadSamples({
+      cannon:    'cannon.mp3',
+      explosion: 'explosion.mp3',
+      warp:      'warp.mp3',
+    });
+  }
+
+  /* ---------- SHIP MODEL PRELOAD ---------- */
+  _preloadShipModels() {
+    this.shipModels = {};
+    this.modelsReady = false;
+
+    const startBtn = document.getElementById('start-btn');
+    startBtn.disabled = true;
+    startBtn.textContent = '◌ LOADING FLEET ASSETS...';
+
+    const term = document.getElementById('terminal');
+    const loadLine = document.createElement('div');
+    loadLine.className = 'line';
+    loadLine.style.animationDelay = '1.9s';
+    loadLine.textContent = '> downloading fleet hulls .... 0%';
+    term.appendChild(loadLine);
+
+    const loader = new THREE.GLTFLoader();
+    const draco = new THREE.DRACOLoader();
+    draco.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+    loader.setDRACOLoader(draco);
+
+    const tiers = ['cruiser', 'destroyer', 'battleship', 'dreadnought'];
+    let done = 0;
+    const updateProgress = () => {
+      const pct = Math.round((done / tiers.length) * 100);
+      loadLine.textContent = `> downloading fleet hulls .... ${pct}%`;
+    };
+
+    Promise.all(tiers.map(tier => new Promise((resolve, reject) => {
+      loader.load(
+        `${tier}.glb`,
+        gltf => {
+          // Pre-process the loaded scene
+          const scene = gltf.scene;
+          const bbox = new THREE.Box3().setFromObject(scene);
+          const size = bbox.getSize(new THREE.Vector3());
+          const center = bbox.getCenter(new THREE.Vector3());
+
+          // Disable shadows on all meshes (perf — many small meshes per ship)
+          scene.traverse(o => {
+            if (o.isMesh) {
+              o.castShadow = false;
+              o.receiveShadow = false;
+              // Some Sketchfab materials have weird sides — force double-sided for safety
+              if (o.material) o.material.side = THREE.FrontSide;
+            }
+          });
+
+          this.shipModels[tier] = { scene, bbox, size, center };
+          done++;
+          updateProgress();
+          resolve();
+        },
+        undefined,
+        err => {
+          console.error(`Failed to load ${tier}.glb`, err);
+          done++;
+          updateProgress();
+          resolve(); // resolve anyway so other ships still load
+        }
+      );
+    }))).then(() => {
+      this.modelsReady = true;
+      loadLine.textContent = '> fleet hulls ............... LOADED';
+      startBtn.disabled = false;
+      startBtn.textContent = '▶ INITIATE ASSAULT';
+    });
+  }
+
+  /* ---------- SCENE ---------- */
+  _initScene() {
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x000003);
+    this.scene.fog = null;
+
+    this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+    this.renderer = new THREE.WebGLRenderer({
+      canvas: this.canvas,
+      antialias: window.devicePixelRatio < 2,
+      powerPreference: 'high-performance'
+    });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.outputEncoding = THREE.sRGBEncoding;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
+
+    // Sun (distant directional light)
+    this.sun = new THREE.DirectionalLight(0xffeecc, 2.2);
+    this.sun.position.set(60, 18, 30);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(1024, 1024);
+    this.sun.shadow.camera.near = 30;
+    this.sun.shadow.camera.far = 120;
+    this.sun.shadow.camera.left = -25;
+    this.sun.shadow.camera.right = 25;
+    this.sun.shadow.camera.top = 25;
+    this.sun.shadow.camera.bottom = -25;
+    this.sun.shadow.bias = -0.0008;
+    this.scene.add(this.sun);
+
+    // Faint ambient + hemisphere for nicer PBR rendering on the ships' GLTF materials.
+    // Without this, shaded sides of ships would render near-black.
+    this.scene.add(new THREE.AmbientLight(0x6677aa, 0.55));
+    this.scene.add(new THREE.HemisphereLight(0x99bbff, 0x332211, 0.4));
+
+    // Visible sun mesh way out there
+    const sunGeo = new THREE.SphereGeometry(4, 16, 16);
+    const sunMat = new THREE.MeshBasicMaterial({ color: 0xffeebb });
+    this.sunMesh = new THREE.Mesh(sunGeo, sunMat);
+    this.sunMesh.position.copy(this.sun.position).multiplyScalar(2);
+    this.scene.add(this.sunMesh);
+
+    // Sun glare sprite
+    const glareCanvas = document.createElement('canvas');
+    glareCanvas.width = 256; glareCanvas.height = 256;
+    const gctx = glareCanvas.getContext('2d');
+    const grad = gctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    grad.addColorStop(0, 'rgba(255,240,180,1)');
+    grad.addColorStop(0.2, 'rgba(255,220,140,0.5)');
+    grad.addColorStop(1, 'rgba(255,180,80,0)');
+    gctx.fillStyle = grad; gctx.fillRect(0,0,256,256);
+    const glareTex = new THREE.CanvasTexture(glareCanvas);
+    const glare = new THREE.Sprite(new THREE.SpriteMaterial({ map: glareTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    glare.scale.set(40, 40, 1);
+    this.sunMesh.add(glare);
+
+    // Starfield + nebula
+    this._createStarfield();
+    this._createNebula();
+
+    // Planet
+    this._createPlanet(this.state.planetLevel);
+
+    window.addEventListener('resize', () => this._onResize());
+  }
+
+  _createStarfield() {
+    const count = 4000;
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      const r = 250 + Math.random() * 50;
+      const theta = Math.random() * TAU;
+      const phi = Math.acos(2 * Math.random() - 1);
+      positions[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+      positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+      positions[i*3+2] = r * Math.cos(phi);
+      const tint = Math.random();
+      if (tint < 0.7) {
+        colors[i*3] = 1.0; colors[i*3+1] = 1.0; colors[i*3+2] = 1.0;
+      } else if (tint < 0.85) {
+        colors[i*3] = 0.85; colors[i*3+1] = 0.92; colors[i*3+2] = 1.0;
+      } else if (tint < 0.95) {
+        colors[i*3] = 1.0; colors[i*3+1] = 0.85; colors[i*3+2] = 0.7;
+      } else {
+        colors[i*3] = 1.0; colors[i*3+1] = 0.95; colors[i*3+2] = 0.6;
+      }
+      sizes[i] = Math.random() < 0.05 ? 2.5 : (Math.random() < 0.3 ? 1.6 : 0.9);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+    const mat = new THREE.PointsMaterial({
+      size: 1.2, sizeAttenuation: false,
+      vertexColors: true, transparent: true, opacity: 0.95,
+      depthWrite: false
+    });
+    this.starfield = new THREE.Points(geo, mat);
+    this.scene.add(this.starfield);
+  }
+
+  _createNebula() {
+    // A few large, faint colored sprites for a sense of depth
+    const sprites = [
+      { color: '#3a1a55', x: -120, y: 40, z: -180, scale: 220 },
+      { color: '#1a3a55', x: 140, y: -30, z: -160, scale: 260 },
+      { color: '#551a2a', x: -50, y: -80, z: 170, scale: 180 },
+      { color: '#2a3a1a', x: 80, y: 90, z: 150, scale: 200 },
+    ];
+    sprites.forEach(s => {
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = 256;
+      const ctx = c.getContext('2d');
+      const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+      grad.addColorStop(0, s.color + 'cc');
+      grad.addColorStop(0.4, s.color + '44');
+      grad.addColorStop(1, s.color + '00');
+      ctx.fillStyle = grad; ctx.fillRect(0,0,256,256);
+      const tex = new THREE.CanvasTexture(c);
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: tex, transparent: true, opacity: 0.4, depthWrite: false,
+        blending: THREE.AdditiveBlending
+      }));
+      sprite.position.set(s.x, s.y, s.z);
+      sprite.scale.set(s.scale, s.scale, 1);
+      this.scene.add(sprite);
+    });
+  }
+
+  _createPlanetTexture(level) {
+    const c = document.createElement('canvas');
+    c.width = 1024; c.height = 512;
+    const ctx = c.getContext('2d');
+    // Procedural palette per level
+    const palettes = [
+      { sea: '#0a2a45', land: '#3a6a3a', highland: '#2a4a2a', desert: '#a08850' },     // earth-like
+      { sea: '#5a2a0a', land: '#9a4520', highland: '#5a200a', desert: '#c07040' },     // mars
+      { sea: '#4a4a4a', land: '#7a7a8a', highland: '#3a3a4a', desert: '#9a9aaa' },     // moon
+      { sea: '#0a4055', land: '#306a85', highland: '#2a4555', desert: '#80b0c0' },     // ice world
+      { sea: '#2a0a3a', land: '#5a1a6a', highland: '#3a0a4a', desert: '#8a4a9a' },     // alien
+      { sea: '#2a1a05', land: '#5a3010', highland: '#3a1a05', desert: '#a07040' },     // scorched
+    ];
+    const palette = palettes[(level - 1) % palettes.length];
+
+    // Sea base
+    ctx.fillStyle = palette.sea;
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    // Continents via blob splatter
+    const continents = 8 + level * 2;
+    for (let i = 0; i < continents; i++) {
+      const cx = Math.random() * c.width;
+      const cy = 80 + Math.random() * (c.height - 160);
+      const blobs = 30 + Math.floor(Math.random() * 40);
+      ctx.fillStyle = palette.land;
+      for (let b = 0; b < blobs; b++) {
+        const dx = cx + (Math.random() - 0.5) * 200;
+        const dy = cy + (Math.random() - 0.5) * 100;
+        const r = 8 + Math.random() * 28;
+        ctx.beginPath(); ctx.arc(dx, dy, r, 0, TAU); ctx.fill();
+      }
+    }
+    // Highlands
+    ctx.fillStyle = palette.highland;
+    for (let i = 0; i < 200; i++) {
+      ctx.beginPath();
+      ctx.arc(Math.random() * c.width, 60 + Math.random() * (c.height - 120), 3 + Math.random() * 14, 0, TAU);
+      ctx.fill();
+    }
+    // Desert / sand bands
+    ctx.fillStyle = palette.desert;
+    ctx.globalAlpha = 0.5;
+    for (let i = 0; i < 80; i++) {
+      ctx.beginPath();
+      ctx.arc(Math.random() * c.width, 40 + Math.random() * (c.height - 80), 4 + Math.random() * 18, 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Ice caps (top and bottom)
+    const capGrad = ctx.createLinearGradient(0, 0, 0, 80);
+    capGrad.addColorStop(0, '#ffffff'); capGrad.addColorStop(1, palette.sea);
+    ctx.fillStyle = capGrad; ctx.fillRect(0, 0, c.width, 80);
+    const capGrad2 = ctx.createLinearGradient(0, c.height-80, 0, c.height);
+    capGrad2.addColorStop(0, palette.sea); capGrad2.addColorStop(1, '#ffffff');
+    ctx.fillStyle = capGrad2; ctx.fillRect(0, c.height-80, c.width, 80);
+
+    return new THREE.CanvasTexture(c);
+  }
+
+  _createPlanet(level) {
+    if (this.planetGroup) {
+      this.scene.remove(this.planetGroup);
+      this.planetGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } });
+    }
+    this.planetGroup = new THREE.Group();
+    this.scene.add(this.planetGroup);
+
+    const radius = 5;
+    this.planetRadius = radius;
+
+    const geo = new THREE.SphereGeometry(radius, 96, 96);
+    const tex = this._createPlanetTexture(level);
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex,
+      roughness: 0.85,
+      metalness: 0.05,
+      bumpMap: tex,
+      bumpScale: 0.06,
+    });
+    this.planet = new THREE.Mesh(geo, mat);
+    this.planet.castShadow = true;
+    this.planet.receiveShadow = true;
+    this.planetGroup.add(this.planet);
+
+    // Atmosphere glow shell
+    const atmoGeo = new THREE.SphereGeometry(radius * 1.08, 64, 64);
+    const atmoMat = new THREE.ShaderMaterial({
+      uniforms: {
+        glowColor: { value: new THREE.Color(0x88aaff) },
+        viewVector: { value: this.camera.position.clone() }
+      },
+      vertexShader: `
+        uniform vec3 viewVector;
+        varying float intensity;
+        void main() {
+          vec3 vNormal = normalize(normalMatrix * normal);
+          vec3 vView = normalize(normalMatrix * viewVector);
+          intensity = pow(0.65 - dot(vNormal, vView), 3.0);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 glowColor;
+        varying float intensity;
+        void main() {
+          gl_FragColor = vec4(glowColor, 1.0) * intensity;
+        }
+      `,
+      side: THREE.BackSide,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+    });
+    this.atmosphere = new THREE.Mesh(atmoGeo, atmoMat);
+    this.planetGroup.add(this.atmosphere);
+
+    // Spawn defense turrets on the surface
+    this.turrets.forEach(t => this.planetGroup.remove(t.mesh));
+    this.turrets = [];
+    const numTurrets = 6 + level * 2;
+    for (let i = 0; i < numTurrets; i++) {
+      const turret = this._createDefenseTurret(level);
+      // Random surface position
+      const u = Math.random();
+      const v = Math.random();
+      const theta = TAU * u;
+      const phi = Math.acos(2*v - 1);
+      const tx = radius * Math.sin(phi) * Math.cos(theta);
+      const ty = radius * Math.cos(phi);
+      const tz = radius * Math.sin(phi) * Math.sin(theta);
+      turret.mesh.position.set(tx, ty, tz);
+      const up = new THREE.Vector3(tx, ty, tz).normalize();
+      turret.mesh.lookAt(turret.mesh.position.clone().add(up));
+      turret.mesh.rotateX(Math.PI / 2);
+      this.planetGroup.add(turret.mesh);
+      this.turrets.push(turret);
+    }
+
+    // Update HP scaling
+    this.state.planetMaxHP = Math.floor(1000 * Math.pow(1.45, level - 1));
+    this.state.planetHP = this.state.planetMaxHP;
+    this._updateHUD();
+  }
+
+  _createDefenseTurret(level) {
+    const group = new THREE.Group();
+    const baseMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.6, roughness: 0.4 });
+    const accentMat = new THREE.MeshStandardMaterial({ color: 0x4a3010, metalness: 0.7, roughness: 0.3, emissive: 0x331500, emissiveIntensity: 0.4 });
+    const barrelMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.85, roughness: 0.2 });
+
+    // Base ring (stays put on surface)
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.08, 12), baseMat);
+    base.castShadow = true;
+    group.add(base);
+
+    // Aim group: yaw + pitch will be applied here. Everything that should move
+    // with the gun goes inside (dome, barrel).
+    const aim = new THREE.Group();
+    aim.position.y = 0.04;
+    aim.rotation.order = 'YZX'; // yaw (Y) first, then elevation (Z), then anything else
+    group.add(aim);
+
+    // Dome that pivots with the gun
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12, 0, TAU, 0, Math.PI/2), accentMat);
+    aim.add(dome);
+
+    // Barrel — cylinder length is along its own +Y; rotation.z=PI/2 lays it horizontal
+    // such that the muzzle ends up at aim-local +X * 0.4 (length 0.4, position 0.18 + 0.2 = 0.38 ≈ 0.4).
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.4, 8), barrelMat);
+    barrel.rotation.z = Math.PI / 2;
+    barrel.position.set(0.18, 0.06, 0);
+    barrel.castShadow = true;
+    aim.add(barrel);
+
+    group.castShadow = true;
+
+    return {
+      mesh: group,
+      aim: aim,
+      barrel: barrel,
+      hp: 36 + level * 14,
+      maxHp: 36 + level * 14,
+      dps: 2.0 + level * 0.7,
+      fireRate: 0.85 + Math.random()*0.3,
+      fireTimer: Math.random() * 1.5,
+      range: 22,
+      target: null,
+    };
+  }
+
+  /* ---------- SHIP CREATION (loads pre-cached GLTF models) ---------- */
+  _createShip(tier) {
+    const cfg = SHIP_TIERS[tier];
+    const group = new THREE.Group();
+
+    const cached = this.shipModels[tier];
+    if (!cached) {
+      console.warn(`Ship model ${tier} not loaded yet, using primitive fallback`);
+      const fallback = new THREE.Mesh(
+        new THREE.BoxGeometry(cfg.length, cfg.height, cfg.width),
+        new THREE.MeshStandardMaterial({ color: cfg.color })
+      );
+      group.add(fallback);
+    } else {
+      const model = cached.scene.clone(true);
+      model.userData.isGltfShared = true;
+
+      // 1. Apply scale based on the longer horizontal axis.
+      const longest = Math.max(cached.size.x, cached.size.z);
+      const scale = cfg.length / longest;
+      model.scale.setScalar(scale);
+
+      // 2. Apply rotation so +X is forward (bow points along +X in local space).
+      if (cached.size.z > cached.size.x) {
+        model.rotation.y = -Math.PI / 2;
+      }
+
+      // 3. Compute the bbox AFTER scale + rotation, then center the model
+      //    so its visual center sits exactly at the group origin.
+      //    (Earlier we used the cached pre-transform bbox center, which is
+      //    why cruiser hits were registering 2× length behind the visible hull —
+      //    the post-transform center didn't match the pre-transform one.)
+      model.updateMatrixWorld(true);
+      const liveBox = new THREE.Box3().setFromObject(model);
+      const liveCenter = liveBox.getCenter(new THREE.Vector3());
+      model.position.sub(liveCenter);
+
+      model.traverse(o => { o.userData.isGltfShared = true; });
+      group.add(model);
+    }
+
+    // Muzzle anchors — local-space points the ship fires from.
+    const deckY = cfg.height * 0.55;
+    let muzzles;
+    if (cfg.id === 'cruiser') {
+      muzzles = [
+        { x:  cfg.length * 0.30, y: deckY, z: 0 },
+        { x: -cfg.length * 0.28, y: deckY, z: 0 },
+      ];
+    } else if (cfg.id === 'destroyer') {
+      muzzles = [
+        { x:  cfg.length * 0.32, y: deckY, z: 0 },
+        { x:  cfg.length * 0.10, y: deckY * 1.1, z: 0 },
+        { x: -cfg.length * 0.30, y: deckY, z: 0 },
+      ];
+    } else if (cfg.id === 'battleship') {
+      muzzles = [
+        { x:  cfg.length * 0.32, y: deckY, z: 0 },
+        { x:  cfg.length * 0.16, y: deckY * 1.15, z: 0 },
+        { x: -cfg.length * 0.28, y: deckY, z: 0 },
+      ];
+    } else { // dreadnought
+      muzzles = [
+        { x:  cfg.length * 0.34, y: deckY, z: 0 },
+        { x:  cfg.length * 0.20, y: deckY * 1.15, z: 0 },
+        { x: -cfg.length * 0.20, y: deckY * 1.15, z: 0 },
+        { x: -cfg.length * 0.34, y: deckY, z: 0 },
+      ];
+    }
+
+    // Bridge anchor — used for first-person "view from bridge" camera.
+    // Sits high up on the superstructure, near the conning tower position.
+    const bridgeAnchor = {
+      x: -cfg.length * 0.05,           // slightly aft of midship
+      y: cfg.height * 1.8,             // above the superstructure
+      z: 0,
+    };
+
+    // ============ FLAME THRUSTERS (3D, axis-aligned) ============
+    // Two-layer tapered cylinder Meshes, oriented along the ship's local +X (stern direction).
+    // Wide at the engine port, tapering to a point further back. This gives the flame a real
+    // 3D presence — it streaks ALONG the ship's body, not perpendicular to the camera like
+    // a sprite billboard would. From the side: long horizontal plume. From the rear: a small
+    // glowing nub. Just like real exhaust.
+    const plumeLen  = cfg.length * 0.55;
+    const plumeRad  = cfg.length * 0.12;       // base radius (where it joins ship)
+    const plumeRadTip = plumeRad * 0.05;       // tip radius (narrows nearly to point)
+    const portCount = ({ cruiser: 2, destroyer: 2, battleship: 3, dreadnought: 4 })[cfg.id] || 2;
+    const portSpread = cfg.width * 0.55;
+
+    const sternX = cfg.length * 0.5;
+    // Engines belong at the hull's vertical center (waterline-equivalent). The bbox is now
+    // centered at y=0 thanks to the live-bbox fix, so y=0 is the right vertical anchor.
+    const sternY = 0;
+
+    group.userData.thrusters = [];
+    for (let i = 0; i < portCount; i++) {
+      const t = portCount === 1 ? 0 : (i / (portCount - 1)) - 0.5;
+      const portZ = t * portSpread;
+
+      // Outer flame — wider, dimmer, red-orange. This is the visible "tail".
+      const outerGeo = new THREE.CylinderGeometry(
+        plumeRadTip,         // top (narrows to tip)
+        plumeRad,            // bottom (base, attached to engine)
+        plumeLen,
+        10, 1, true          // radial segs, height segs, open-ended (no caps)
+      );
+      const outerMat = new THREE.MeshBasicMaterial({
+        color: 0xff5511,
+        transparent: true,
+        opacity: 0.75,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      });
+      const outer = new THREE.Mesh(outerGeo, outerMat);
+      // Cylinder default axis is +Y. Rotating -PI/2 around Z maps the cylinder's local +Y
+      // to world +X. After rotation: top of cylinder ends up at +X side (= away from ship).
+      outer.rotation.z = -Math.PI / 2;
+      // Position so the BASE end sits at sternX (touching the ship), the tip extends out to +X.
+      // Cylinder is centered at the mesh's position, so center = sternX + plumeLen/2.
+      outer.position.set(sternX + plumeLen * 0.5, sternY, portZ);
+      group.add(outer);
+
+      // Inner core — narrower, brighter, blue-white hot. The intense center.
+      const coreLen = plumeLen * 0.7;
+      const coreRad = plumeRad * 0.5;
+      const coreRadTip = coreRad * 0.05;
+      const coreGeo = new THREE.CylinderGeometry(coreRadTip, coreRad, coreLen, 8, 1, true);
+      const coreMat = new THREE.MeshBasicMaterial({
+        color: 0xaaeeff,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      });
+      const core = new THREE.Mesh(coreGeo, coreMat);
+      core.rotation.z = -Math.PI / 2;
+      core.position.set(sternX + coreLen * 0.5, sternY, portZ);
+      group.add(core);
+
+      group.userData.thrusters.push({
+        flame: outer,
+        core: core,
+        baseLenF: plumeLen,
+        baseLenC: coreLen,
+        phase: Math.random() * TAU,
+      });
+    }
+
+    // ============ TAP HITBOX ============
+    // Invisible enlarged box covering the ship for forgiving touch hits on mobile.
+    // Raycaster checks against this — much easier to hit than a slim ship.
+    const hit = new THREE.Mesh(
+      new THREE.BoxGeometry(cfg.length * 1.1, cfg.height * 2.4, cfg.width * 2.2),
+      new THREE.MeshBasicMaterial({ visible: false })
+    );
+    hit.userData.isShipHitbox = true;
+    group.add(hit);
+    group.userData.hitbox = hit;
+
+    return {
+      tier: cfg.id,
+      cfg: cfg,
+      mesh: group,
+      muzzles: muzzles,
+      muzzleSeq: 0,
+      bridgeAnchor: bridgeAnchor,
+      hp: cfg.hull,
+      maxHp: cfg.hull,
+      dps: cfg.dps,
+      fireRate: cfg.fireRate,
+      fireMode: cfg.fireMode || 'continuous',
+      fireTimer: Math.random() * (1 / cfg.fireRate),
+      // Volley state (only used if fireMode === 'volley')
+      volleyTimer: 1.5 + Math.random() * 1.5,    // initial delay before first volley
+      volleyActive: false,
+      volleyShotIdx: 0,
+      volleyShotTimer: 0,
+      range: cfg.range,
+      orbitR: cfg.orbitR,
+      orbitSpeed: cfg.orbitSpeed * (Math.random() < 0.5 ? 1 : -1),
+      orbitAngle: Math.random() * TAU,
+      orbitTilt: rand(-0.3, 0.3),
+      orbitPhase: Math.random() * TAU,
+      bobPhase: Math.random() * TAU,
+      turrets: [],
+      // For external hp/HUD references
+      id: ++Game._shipIdCounter,
+    };
+  }
+
+
+  /* ---------- COMBAT ---------- */
+  _spawnShip(tier) {
+    const cfg = SHIP_TIERS[tier];
+    if (this.state.resources < cfg.cost) {
+      this._toast('INSUFFICIENT SCRAP', 'warn');
+      this.audio.ui(220);
+      return false;
+    }
+    this.state.resources -= cfg.cost;
+    const ship = this._createShip(tier);
+    this.scene.add(ship.mesh);
+    this.ships.push(ship);
+    this.state.fleet++;
+    this._toast(`${cfg.code} ${cfg.name} COMMISSIONED`, 'good');
+    this.audio.ui(660);
+    this._updateHUD();
+    return true;
+  }
+
+  _fireShipProjectile(ship, opts = {}) {
+    if (!ship.muzzles || ship.muzzles.length === 0) return;
+    const m = opts.muzzle || ship.muzzles[ship.muzzleSeq % ship.muzzles.length];
+    if (!opts.muzzle) ship.muzzleSeq++;
+
+    const worldPos = new THREE.Vector3(m.x, m.y, m.z);
+    ship.mesh.localToWorld(worldPos);
+
+    const targetPoint = new THREE.Vector3(rand(-1,1), rand(-1,1), rand(-1,1)).normalize().multiplyScalar(this.planetRadius * 0.95);
+    targetPoint.add(this.planetGroup.position);
+
+    const dir = targetPoint.clone().sub(worldPos).normalize();
+
+    // Tier-scaled visuals (tier index 1-4)
+    const tierIdx = ({ cruiser: 1, destroyer: 2, battleship: 3, dreadnought: 4 })[ship.cfg.id] || 1;
+    const shellSize = 0.4 + tierIdx * 0.18;  // bigger ships → bigger glowing rounds
+
+    this._spawnProjectile({
+      pos: worldPos,
+      dir: dir,
+      speed: 28,
+      color: 0xffe6a8,
+      glowColor: 0xff7722,
+      trailColor: 0xff5511,
+      trailRate: 0.035,
+      trailSize: shellSize * 0.8,
+      damage: ship.dps / ship.fireRate,
+      maxLife: 2.2,
+      fromShip: true,
+      sourceShip: ship,
+      size: shellSize,
+    });
+
+    this._spawnMuzzleFlash(worldPos, dir, 0xffd488, 1.0 + tierIdx * 0.35);
+    this.audio.cannon(0.85, tierIdx);
+  }
+
+  _fireTurretProjectile(turret) {
+    if (!turret.target) return;
+    const muzzleWorld = turret.barrel.localToWorld(new THREE.Vector3(0, -0.2, 0));
+
+    const targetPos = new THREE.Vector3();
+    turret.target.mesh.getWorldPosition(targetPos);
+    const dir = targetPos.clone().sub(muzzleWorld).normalize();
+
+    this._spawnProjectile({
+      pos: muzzleWorld,
+      dir: dir,
+      speed: 36,
+      color: 0xaaffbb,
+      glowColor: 0x33ee55,
+      trailColor: 0x22aa44,
+      trailRate: 0.05,
+      trailSize: 0.35,
+      damage: turret.dps / turret.fireRate,
+      maxLife: 1.6,
+      fromShip: false,
+      target: turret.target,
+      size: 0.45,
+    });
+    this._spawnMuzzleFlash(muzzleWorld, dir, 0x88ffaa, 0.7);
+    this.audio.turret();
+  }
+
+  _spawnProjectile(p) {
+    // Solid 3D streak (the shell in motion-blur), oriented along velocity.
+    // Tapered cylinder — fat at the leading edge, narrowing toward the trail. The +Y end
+    // of CylinderGeometry becomes the front after we orient Y → dir.
+    const dir = p.dir.clone().normalize();
+    const streakLen = 1.0 + (p.size || 0.5) * 1.2;     // longer for heavier rounds
+    const radF = (p.size || 0.5) * 0.18;               // front radius (fatter)
+    const radB = radF * 0.35;                          // back radius (narrows)
+    const streakGeo = new THREE.CylinderGeometry(radF, radB, streakLen, 8);
+    const streakMat = new THREE.MeshBasicMaterial({
+      color: p.color, transparent: true, opacity: 0.95,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const streak = new THREE.Mesh(streakGeo, streakMat);
+    streak.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    // Position so the FRONT of the streak is at p.pos, trail extends backward
+    streak.position.copy(p.pos).sub(dir.clone().multiplyScalar(streakLen * 0.5));
+    this.scene.add(streak);
+
+    // Hot leading tip — small, solid sprite for the shell's heat signature
+    if (!this._tipTex) {
+      const c = document.createElement('canvas');
+      c.width = 32; c.height = 32;
+      const ctx = c.getContext('2d');
+      // TIGHT gradient — sharp white core, fast falloff. NOT fluffy.
+      const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+      grad.addColorStop(0,    'rgba(255,255,255,1)');
+      grad.addColorStop(0.35, 'rgba(255,240,180,0.85)');
+      grad.addColorStop(0.65, 'rgba(255,150,40,0.3)');
+      grad.addColorStop(1,    'rgba(255,80,0,0)');
+      ctx.fillStyle = grad; ctx.fillRect(0,0,32,32);
+      this._tipTex = new THREE.CanvasTexture(c);
+    }
+    const tip = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this._tipTex, color: 0xffffff, transparent: true,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    }));
+    const tipS = (p.size || 0.5) * 0.7;   // SMALL — no more big fluffy halos
+    tip.scale.set(tipS, tipS, 1);
+    tip.position.copy(p.pos);
+    this.scene.add(tip);
+
+    this.projectiles.push({
+      mesh: streak,        // for compatibility with damage/dispose code
+      glow: tip,
+      streakDir: dir,
+      streakLen: streakLen,
+      pos: p.pos.clone(),
+      vel: p.dir.clone().multiplyScalar(p.speed),
+      damage: p.damage,
+      life: 0,
+      maxLife: p.maxLife,
+      fromShip: p.fromShip,
+      target: p.target || null,
+      sourceShip: p.sourceShip || null,
+      // Trail
+      trailTimer: 0,
+      trailColor: p.trailColor || p.glowColor,
+      trailRate: p.trailRate || 0.05,    // slightly less frequent — let the streak carry the look
+      trailSize: (p.trailSize || (p.size || 0.5) * 0.55),
+    });
+  }
+
+  _spawnTrailPuff(pos, color, size) {
+    if (!this._smokeTex) {
+      const c = document.createElement('canvas');
+      c.width = 64; c.height = 64;
+      const ctx = c.getContext('2d');
+      const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+      grad.addColorStop(0,   'rgba(255,255,255,0.8)');
+      grad.addColorStop(0.5, 'rgba(180,180,180,0.4)');
+      grad.addColorStop(1,   'rgba(40,40,40,0)');
+      ctx.fillStyle = grad; ctx.fillRect(0,0,64,64);
+      this._smokeTex = new THREE.CanvasTexture(c);
+    }
+    const puff = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this._smokeTex, color: color, transparent: true,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    }));
+    puff.scale.set(size, size, 1);
+    puff.position.copy(pos);
+    this.scene.add(puff);
+    this.particles.push({
+      type: 'puff',
+      mesh: puff,
+      life: 0,
+      maxLife: 0.35,
+      startScale: size,
+      endScale: size * 1.8,
+    });
+  }
+
+  _spawnMuzzleFlash(pos, dir, color, scale = 1.0) {
+    // Bright additive star + dim outer halo + (for big shots) drifting smoke ring.
+    if (!this._flashTex) {
+      const c = document.createElement('canvas');
+      c.width = 128; c.height = 128;
+      const ctx = c.getContext('2d');
+      const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grad.addColorStop(0,    'rgba(255,255,220,1)');
+      grad.addColorStop(0.3,  'rgba(255,200,120,0.85)');
+      grad.addColorStop(0.65, 'rgba(255,120,40,0.4)');
+      grad.addColorStop(1,    'rgba(120,30,0,0)');
+      ctx.fillStyle = grad; ctx.fillRect(0,0,128,128);
+      this._flashTex = new THREE.CanvasTexture(c);
+    }
+    // Inner bright flash
+    const puff = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this._flashTex, color: 0xffffff, transparent: true, depthWrite: false,
+      blending: THREE.AdditiveBlending
+    }));
+    puff.position.copy(pos);
+    const baseS = 1.4 * scale;
+    puff.scale.set(baseS, baseS, 1);
+    this.scene.add(puff);
+    this.particles.push({
+      type: 'puff', mesh: puff, life: 0, maxLife: 0.13,
+      startScale: baseS, endScale: baseS * 2.4,
+    });
+
+    // Outer halo (color tinted)
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this._flashTex, color: color, transparent: true, depthWrite: false,
+      blending: THREE.AdditiveBlending
+    }));
+    halo.position.copy(pos);
+    const haloS = baseS * 1.6;
+    halo.scale.set(haloS, haloS, 1);
+    halo.material.opacity = 0.7;
+    this.scene.add(halo);
+    this.particles.push({
+      type: 'puff', mesh: halo, life: 0, maxLife: 0.22,
+      startScale: haloS, endScale: haloS * 2.8,
+    });
+
+    // Drifting smoke ring (only for heavy shots)
+    if (scale > 1.4) {
+      if (!this._smokeTex) {
+        const c2 = document.createElement('canvas');
+        c2.width = 64; c2.height = 64;
+        const ctx2 = c2.getContext('2d');
+        const grad2 = ctx2.createRadialGradient(32, 32, 0, 32, 32, 32);
+        grad2.addColorStop(0,   'rgba(255,255,255,0.8)');
+        grad2.addColorStop(0.5, 'rgba(180,180,180,0.4)');
+        grad2.addColorStop(1,   'rgba(40,40,40,0)');
+        ctx2.fillStyle = grad2; ctx2.fillRect(0,0,64,64);
+        this._smokeTex = new THREE.CanvasTexture(c2);
+      }
+      const smoke = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: this._smokeTex, color: 0x886655, transparent: true, depthWrite: false,
+        blending: THREE.NormalBlending,
+      }));
+      smoke.position.copy(pos);
+      const smokeS = baseS * 0.9;
+      smoke.scale.set(smokeS, smokeS, 1);
+      smoke.material.opacity = 0.6;
+      this.scene.add(smoke);
+      this.particles.push({
+        type: 'puff', mesh: smoke, life: 0, maxLife: 0.6,
+        startScale: smokeS, endScale: smokeS * 2.4,
+      });
+    }
+  }
+
+  _spawnExplosion(pos, scale, color = 0xff8833, big = false) {
+    // No PointLights — sprite-based for perf. Big explosions get a bigger fireball.
+    if (!this._explosionTex) {
+      const c = document.createElement('canvas');
+      c.width = 128; c.height = 128;
+      const ctx = c.getContext('2d');
+      const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grad.addColorStop(0,    'rgba(255,255,220,1)');
+      grad.addColorStop(0.25, 'rgba(255,200,100,0.9)');
+      grad.addColorStop(0.55, 'rgba(255,90,30,0.6)');
+      grad.addColorStop(1,    'rgba(60,10,0,0)');
+      ctx.fillStyle = grad; ctx.fillRect(0,0,128,128);
+      this._explosionTex = new THREE.CanvasTexture(c);
+    }
+    const fireball = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this._explosionTex, color: color, transparent: true, depthWrite: false,
+      blending: THREE.AdditiveBlending
+    }));
+    fireball.position.copy(pos);
+    fireball.scale.set(scale, scale, 1);
+    this.scene.add(fireball);
+    this.particles.push({
+      type: 'fireball', mesh: fireball,
+      life: 0, maxLife: big ? 0.9 : 0.5,
+      startScale: scale, endScale: scale * (big ? 4 : 2.5),
+    });
+
+    // Shrapnel — share geometry, share material per explosion. Counts slashed: 24→6 / 10→3.
+    if (!this._shardGeo) this._shardGeo = new THREE.BoxGeometry(0.06, 0.06, 0.06);
+    const shardMat = new THREE.MeshBasicMaterial({ color: color, transparent: true });
+    const shardCount = big ? 6 : 3;
+    for (let i = 0; i < shardCount; i++) {
+      const shard = new THREE.Mesh(this._shardGeo, shardMat);
+      shard.position.copy(pos);
+      const v = new THREE.Vector3(rand(-1,1), rand(-1,1), rand(-1,1)).normalize().multiplyScalar(rand(2, big ? 8 : 4));
+      this.scene.add(shard);
+      this.particles.push({
+        type: 'shard', mesh: shard,
+        vel: v,
+        life: 0, maxLife: big ? rand(0.6, 1.0) : rand(0.25, 0.5),
+        rotAxis: new THREE.Vector3(rand(-1,1), rand(-1,1), rand(-1,1)).normalize(),
+        rotSpeed: rand(2, 8),
+        sharedMat: shardMat,  // last shard to die disposes the material
+        isLastShard: i === shardCount - 1,
+      });
+    }
+
+    this.audio.explosion(big);
+  }
+
+  _damagePlanet(amount, hitPos, sourceShip = null) {
+    // Bail if the planet is already dead / mid-destruction. Without this guard, every
+    // projectile in flight when the kill shot lands also calls _damagePlanet and recurses
+    // into _destroyPlanet, multi-counting credits + level-ups + turret spawns.
+    if (this._planetDying || this.state.planetHP <= 0) return;
+
+    this.state.planetHP -= amount;
+    if (hitPos) {
+      const tierIdx = sourceShip ? ({ cruiser: 1, destroyer: 2, battleship: 3, dreadnought: 4 })[sourceShip.cfg.id] || 1 : 1;
+      const impactSize = 0.6 + tierIdx * 0.35;
+
+      // Main fireball
+      this._spawnExplosion(hitPos, impactSize, 0xffaa44, tierIdx >= 3);
+
+      // Persistent crater on the planet surface — accumulates damage visibly.
+      this._addPlanetCrater(hitPos, 0.18 + tierIdx * 0.12);
+
+      // Camera shake — heavier ships rattle the view
+      if (tierIdx >= 2) {
+        this._addShake(0.04 * tierIdx);
+      }
+
+      // Dust/debris cloud
+      if (!this._smokeTex) {
+        const c2 = document.createElement('canvas');
+        c2.width = 64; c2.height = 64;
+        const ctx2 = c2.getContext('2d');
+        const grad2 = ctx2.createRadialGradient(32, 32, 0, 32, 32, 32);
+        grad2.addColorStop(0,   'rgba(255,255,255,0.8)');
+        grad2.addColorStop(0.5, 'rgba(180,180,180,0.4)');
+        grad2.addColorStop(1,   'rgba(40,40,40,0)');
+        ctx2.fillStyle = grad2; ctx2.fillRect(0,0,64,64);
+        this._smokeTex = new THREE.CanvasTexture(c2);
+      }
+      const dustCount = tierIdx >= 3 ? 4 : 2;
+      for (let i = 0; i < dustCount; i++) {
+        const dust = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: this._smokeTex, color: 0x886655, transparent: true, depthWrite: false,
+        }));
+        const offset = new THREE.Vector3(rand(-0.3,0.3), rand(-0.3,0.3), rand(-0.3,0.3)).multiplyScalar(impactSize);
+        dust.position.copy(hitPos).add(offset);
+        const ds = impactSize * 0.9;
+        dust.scale.set(ds, ds, 1);
+        dust.material.opacity = 0.7;
+        this.scene.add(dust);
+        this.particles.push({
+          type: 'puff', mesh: dust, life: 0, maxLife: 0.8 + Math.random() * 0.4,
+          startScale: ds, endScale: ds * 2.5,
+        });
+      }
+
+      this.audio.hit(tierIdx >= 3);
+    }
+    this.state.resources += Math.max(1, Math.floor(amount * 0.6));
+    if (this.state.planetHP <= 0) {
+      this._destroyPlanet();
+    }
+    this._updateHUD();
+  }
+
+  // Plant a persistent crater decal on the planet surface at the impact location.
+  // Craters accumulate over the planet's life — the more shots land, the more scarred it gets.
+  _addPlanetCrater(worldHitPos, size) {
+    if (!this._craterTex) {
+      // Crater texture: dark center, glowing magma ring, soft falloff edge
+      const c = document.createElement('canvas');
+      c.width = 128; c.height = 128;
+      const ctx = c.getContext('2d');
+      const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grad.addColorStop(0,    'rgba(20, 8, 4, 1.0)');
+      grad.addColorStop(0.40, 'rgba(50, 20, 8, 0.9)');
+      grad.addColorStop(0.55, 'rgba(180, 60, 15, 0.85)');  // hot ring
+      grad.addColorStop(0.70, 'rgba(255, 140, 40, 0.55)');
+      grad.addColorStop(0.85, 'rgba(255, 100, 30, 0.20)');
+      grad.addColorStop(1,    'rgba(120, 40, 10, 0)');
+      ctx.fillStyle = grad; ctx.fillRect(0,0,128,128);
+      this._craterTex = new THREE.CanvasTexture(c);
+    }
+
+    // World-space hit position → planet-local position so the crater rotates with the planet
+    const localPos = worldHitPos.clone().sub(this.planetGroup.position);
+    const normal = localPos.clone().normalize();
+
+    // Counter-rotate to undo the planet's accumulated rotation, so the crater stays
+    // attached at the right surface point as the planet spins.
+    const inv = this.planetGroup.quaternion.clone().invert();
+    localPos.applyQuaternion(inv);
+    normal.applyQuaternion(inv);
+
+    const crater = new THREE.Mesh(
+      new THREE.CircleGeometry(size, 16),
+      new THREE.MeshBasicMaterial({
+        map: this._craterTex,
+        transparent: true,
+        depthWrite: false,
+        opacity: 1.0,
+      })
+    );
+    // Sit on the surface, oriented outward
+    crater.position.copy(normal).multiplyScalar(this.planetRadius * 1.005);
+    // Orient to face outward from planet center
+    crater.lookAt(normal.clone().multiplyScalar(this.planetRadius * 2));
+    this.planetGroup.add(crater);
+
+    // Track for cleanup + cap memory
+    this._craters = this._craters || [];
+    crater.userData._lifeStart = this.gameTime;
+    this._craters.push(crater);
+    if (this._craters.length > 60) {
+      const old = this._craters.shift();
+      this.planetGroup.remove(old);
+      old.geometry.dispose();
+      old.material.dispose();
+    }
+  }
+
+  _clearPlanetCraters() {
+    if (!this._craters) return;
+    for (const c of this._craters) {
+      this.planetGroup.remove(c);
+      c.geometry.dispose();
+      c.material.dispose();
+    }
+    this._craters = [];
+  }
+
+  _addShake(amount) {
+    this._shakeAmount = Math.max(this._shakeAmount || 0, amount);
+  }
+
+  _applyShake() {
+    if (!this._shakeAmount || this._shakeAmount < 0.001) {
+      this._shakeAmount = 0;
+      return;
+    }
+    const a = this._shakeAmount;
+    this.camera.position.x += (Math.random() - 0.5) * a;
+    this.camera.position.y += (Math.random() - 0.5) * a;
+    this.camera.position.z += (Math.random() - 0.5) * a;
+    // Decay each frame
+    this._shakeAmount *= 0.84;
+  }
+
+  _destroyShip(ship, idx) {
+    // Big explosion at ship location
+    const wp = new THREE.Vector3();
+    ship.mesh.getWorldPosition(wp);
+    const scale = ship.cfg.length * 0.6;
+    this._spawnExplosion(wp, scale, 0xffaa44, true);
+    // Secondary explosions chain
+    for (let i = 0; i < 3; i++) {
+      const offset = new THREE.Vector3(rand(-1,1), rand(-1,1), rand(-1,1)).multiplyScalar(ship.cfg.length*0.3);
+      setTimeout(() => {
+        this._spawnExplosion(wp.clone().add(offset), scale*0.6, 0xff6622, false);
+      }, 80 + i*100);
+    }
+    this.scene.remove(ship.mesh);
+    ship.mesh.traverse(o => {
+      // Skip GLTF-shared geometry/materials — they're reused across all ships of this class
+      if (o.userData && o.userData.isGltfShared) return;
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) { if (Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); }
+    });
+    this.ships.splice(idx, 1);
+    this.state.fleet--;
+    this._updateHUD();
+    this._toast(`${ship.cfg.code} LOST`, 'warn');
+  }
+
+  _destroyTurret(turret, idx) {
+    const wp = new THREE.Vector3();
+    turret.mesh.getWorldPosition(wp);
+    this._spawnExplosion(wp, 0.5, 0xffaa44, false);
+    this.planetGroup.remove(turret.mesh);
+    turret.mesh.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) { if (Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); }
+    });
+    this.turrets.splice(idx, 1);
+  }
+
+  _destroyPlanet() {
+    if (this._planetDying) return;
+    this._planetDying = true;
+
+    this.audio.victoryFanfare();
+    const center = this.planetGroup.position.clone();
+    const chainCount = 6;
+    const chainGap = 140;
+    this._addShake(0.18);
+    for (let i = 0; i < chainCount; i++) {
+      const offset = new THREE.Vector3(rand(-1,1), rand(-1,1), rand(-1,1)).normalize().multiplyScalar(this.planetRadius * rand(0.4, 1.0));
+      setTimeout(() => {
+        this._spawnExplosion(center.clone().add(offset), this.planetRadius * 0.5, 0xff6622, true);
+        this._addShake(0.10);
+      }, i * chainGap);
+    }
+    setTimeout(() => {
+      this._spawnExplosion(center, this.planetRadius * 1.6, 0xffeecc, true);
+      this._spawnExplosion(center, this.planetRadius * 2.2, 0xff4422, true);
+      this._addShake(0.45);
+
+      const bonus = 200 * Math.pow(1.4, this.state.planetLevel - 1);
+      this.state.resources += Math.floor(bonus);
+      this.state.planetsDestroyed++;
+      this.state.planetLevel++;
+      this._toast(`PLANET DESTROYED  +${Math.floor(bonus)} SCRAP`, 'good');
+
+      // Spawn debris chunks at the moment the finale explosions go off
+      this._spawnPlanetChunks(center);
+
+      // Hide the planet (and its turrets) — they're visually replaced by chunks now
+      this.planetGroup.visible = false;
+      // Wipe in-flight projectiles — neither side has anything to shoot at
+      this.projectiles.forEach(p => {
+        this.scene.remove(p.mesh); this.scene.remove(p.glow);
+        if (p.mesh.geometry) p.mesh.geometry.dispose();
+        if (p.mesh.material) p.mesh.material.dispose();
+        if (p.glow.material) p.glow.material.dispose();
+      });
+      this.projectiles = [];
+
+      // Begin warp sequence
+      this._enterWarpPhase('aftermath');
+    }, chainCount * chainGap + 200);
+  }
+
+  /* ---------- PLANET CHUNKS ---------- */
+  _spawnPlanetChunks(center) {
+    // Mix of varied polyhedra at varied sizes — looks like real planetary debris.
+    // Sizes: a handful of big chunks, more medium, lots of small. Total ~25.
+    const recipes = [
+      ...Array(5).fill(null).map(() => ({ size: rand(0.45, 0.75) * this.planetRadius })),
+      ...Array(10).fill(null).map(() => ({ size: rand(0.18, 0.35) * this.planetRadius })),
+      ...Array(10).fill(null).map(() => ({ size: rand(0.05, 0.14) * this.planetRadius })),
+    ];
+    const geoFactories = [
+      s => new THREE.IcosahedronGeometry(s, 0),
+      s => new THREE.DodecahedronGeometry(s, 0),
+      s => new THREE.OctahedronGeometry(s, 0),
+      s => new THREE.IcosahedronGeometry(s, 1),  // smoother, varied count
+    ];
+    for (const r of recipes) {
+      const geo = geoFactories[Math.floor(Math.random() * geoFactories.length)](r.size);
+      // Distort vertices for organic non-perfect look
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const off = (Math.random() - 0.5) * r.size * 0.22;
+        pos.setX(i, pos.getX(i) + off);
+        pos.setY(i, pos.getY(i) + off * 0.7);
+        pos.setZ(i, pos.getZ(i) + off * 0.85);
+      }
+      geo.computeVertexNormals();
+
+      const mat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color().setHSL(rand(0.04, 0.10), 0.35, rand(0.18, 0.32)),
+        roughness: 0.92, metalness: 0.05,
+        emissive: new THREE.Color(0xff5522),
+        emissiveIntensity: rand(0.15, 0.35),
+      });
+
+      const chunk = new THREE.Mesh(geo, mat);
+      // Spawn near the planet center, ejected outward
+      const dir = new THREE.Vector3(rand(-1,1), rand(-1,1), rand(-1,1)).normalize();
+      chunk.position.copy(center).add(dir.clone().multiplyScalar(this.planetRadius * rand(0.1, 0.5)));
+      chunk.userData = {
+        vel: dir.clone().multiplyScalar(rand(0.8, 2.4)),
+        rotAxis: new THREE.Vector3(rand(-1,1), rand(-1,1), rand(-1,1)).normalize(),
+        rotSpeed: rand(0.4, 1.6),
+        emissiveDecay: rand(0.4, 0.9),  // how fast the residual hot glow fades
+      };
+      this.scene.add(chunk);
+      this.chunks.push(chunk);
+    }
+  }
+
+  _updateChunks(dt, drag = 0.992) {
+    for (const c of this.chunks) {
+      c.position.add(c.userData.vel.clone().multiplyScalar(dt));
+      c.userData.vel.multiplyScalar(drag);
+      c.rotateOnAxis(c.userData.rotAxis, c.userData.rotSpeed * dt);
+      // Cool from hot orange to dark over time
+      const m = c.material;
+      m.emissiveIntensity = Math.max(0, m.emissiveIntensity - c.userData.emissiveDecay * dt * 0.05);
+    }
+  }
+
+  _clearChunks() {
+    for (const c of this.chunks) {
+      this.scene.remove(c);
+      c.geometry.dispose();
+      c.material.dispose();
+    }
+    this.chunks = [];
+  }
+
+  /* ---------- WARP SEQUENCE ---------- */
+  _initWarpFx() {
+    if (this._warpStreaks) return;
+    // Pre-allocate streak line geometry. We'll update positions every frame during tunnel.
+    const N = 280;
+    const positions = new Float32Array(N * 6);   // 2 verts × 3 floats per line
+    const colors    = new Float32Array(N * 6);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+    const mat = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this._warpStreaks = new THREE.LineSegments(geo, mat);
+    this._warpStreaks.frustumCulled = false;
+    this._warpStreaks.visible = false;
+    this.scene.add(this._warpStreaks);
+
+    // Per-streak data — randomized once
+    this._warpStreaksData = [];
+    for (let i = 0; i < N; i++) {
+      this._warpStreaksData.push({
+        offsetAngle:  Math.random() * TAU,
+        offsetRadius: rand(1.2, 35),
+        depth:        rand(-60, 60),
+        length:       rand(3, 14),
+        speed:        rand(80, 180),
+      });
+    }
+
+    // Bright forward "warp core" — a glowing point that grows during charging,
+    // becomes the central vanishing point of the tunnel.
+    if (!this._warpCoreTex) {
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = 256;
+      const ctx = c.getContext('2d');
+      const grad = ctx.createRadialGradient(128,128, 0, 128,128, 128);
+      grad.addColorStop(0,    'rgba(255,255,255,1)');
+      grad.addColorStop(0.15, 'rgba(220,240,255,0.95)');
+      grad.addColorStop(0.40, 'rgba(120,180,255,0.5)');
+      grad.addColorStop(0.75, 'rgba(40,80,200,0.18)');
+      grad.addColorStop(1,    'rgba(0,0,40,0)');
+      ctx.fillStyle = grad; ctx.fillRect(0,0,256,256);
+      this._warpCoreTex = new THREE.CanvasTexture(c);
+    }
+    this._warpCore = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this._warpCoreTex, color: 0xffffff, transparent: true,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    }));
+    this._warpCore.scale.set(1, 1, 1);
+    this._warpCore.visible = false;
+    this.scene.add(this._warpCore);
+
+    // Full-screen DOM flash element for warp jump / arrival impacts
+    const flash = document.createElement('div');
+    flash.style.cssText = `
+      position: absolute; inset: 0; z-index: 36; pointer-events: none;
+      background: white; opacity: 0; transition: opacity 0.15s ease-out;
+    `;
+    document.body.appendChild(flash);
+    this._warpFlashEl = flash;
+  }
+
+  _flashScreen(intensity = 1, fadeMs = 600) {
+    if (!this._warpFlashEl) return;
+    this._warpFlashEl.style.transition = 'opacity 0.05s ease-out';
+    this._warpFlashEl.style.opacity = String(intensity);
+    setTimeout(() => {
+      this._warpFlashEl.style.transition = `opacity ${fadeMs}ms ease-out`;
+      this._warpFlashEl.style.opacity = '0';
+    }, 60);
+  }
+
+  _enterWarpPhase(phase) {
+    this._initWarpFx();
+    this.warpState = phase;
+    this.warpTimer = 0;
+
+    if (phase === 'aftermath') {
+      // Save orbital cam state so we can restore later
+      this._warpStartCam = { ...this.camState };
+      // Boost ships' thrusters slightly during the buildup
+      this.ships.forEach(s => { s.userData_warpIntensify = 1; });
+      // Set the warp axis (forward direction we'll travel) — pick a direction away from
+      // the wreckage so chunks visually drift "away" as we approach warp.
+      this._warpAxis = new THREE.Vector3(
+        Math.cos(this.camState.azimuth + Math.PI),
+        0.05,
+        Math.sin(this.camState.azimuth + Math.PI)
+      ).normalize();
+    }
+    if (phase === 'charging') {
+      // Audio: warp drive engaging. Plays from 8s mark for ~9s through tunnel + arrival.
+      this.audio.playSample('warp', { offset: 8.0, duration: 9.0, gain: 0.85 });
+      this._warpCore.visible = true;
+      this._warpCore.position.copy(this.camera.position).add(
+        this._warpAxis.clone().multiplyScalar(35)
+      );
+      this._toast('WARP DRIVE :: SPOOLING', 'good', 1500);
+    }
+    if (phase === 'jump') {
+      this._flashScreen(1.0, 700);
+      this._addShake(0.5);
+      // Hide ships — they've engaged warp
+      this.ships.forEach(s => { s.mesh.visible = false; });
+      this._warpStreaks.visible = true;
+    }
+    if (phase === 'tunnel') {
+      this._toast('// IN WARP //', 'good', 4000);
+    }
+    if (phase === 'arriving') {
+      // Big terminal flash as we drop out
+      this._flashScreen(0.9, 800);
+      this._addShake(0.3);
+    }
+  }
+
+  _exitWarp() {
+    this.warpState = 'idle';
+    this.warpTimer = 0;
+    this._planetDying = false;
+    if (this._warpStreaks) this._warpStreaks.visible = false;
+    if (this._warpCore) this._warpCore.visible = false;
+    this._clearChunks();
+
+    // Spawn the new planet (back at origin — visual coords unchanged, the journey was the show)
+    this._clearPlanetCraters();
+    this.planetGroup.visible = true;
+    this._createPlanet(this.state.planetLevel);
+
+    // Bring ships back, reset thruster intensifier
+    this.ships.forEach(s => {
+      s.mesh.visible = true;
+      s.userData_warpIntensify = 1;
+    });
+
+    // Restore orbital camera to a slightly fresh angle so it doesn't snap awkwardly
+    if (this._warpStartCam) {
+      this.camState.azimuth = this._warpStartCam.azimuth;
+      this.camState.elevation = this._warpStartCam.elevation;
+      this.camState.distance = this._warpStartCam.distance;
+      this.camState.targetDistance = this._warpStartCam.targetDistance;
+    }
+
+    this._toast(`NEW TARGET // SECTOR ${String(this.state.planetLevel).padStart(2,'0')}`, 'good');
+  }
+
+  _updateWarp(dt) {
+    if (this.warpState === 'idle') return;
+    this.warpTimer += dt;
+
+    switch (this.warpState) {
+      case 'aftermath': {
+        // Chunks drift outward. Camera does normal orbit — player surveys the wreckage.
+        this._updateChunks(dt);
+        if (this.warpTimer >= 2.5) this._enterWarpPhase('charging');
+        break;
+      }
+      case 'charging': {
+        this._updateChunks(dt);
+        // Energy core grows in front of fleet, ships' thrusters intensify
+        const t = this.warpTimer / 1.5;
+        const coreSize = 0.5 + t * t * 14;
+        this._warpCore.scale.set(coreSize, coreSize, 1);
+        this._warpCore.material.opacity = Math.min(1, t * 1.4);
+        // Position core just ahead of camera along warp axis (so it stays visible)
+        this._warpCore.position.copy(this.camera.position).add(
+          this._warpAxis.clone().multiplyScalar(35)
+        );
+        // Boost ship thrusters — ramps from 1× to ~3.5×
+        const boost = 1 + t * t * 2.5;
+        this.ships.forEach(s => { s.userData_warpIntensify = boost; });
+        // Subtle shake builds
+        this._addShake(0.02 + t * 0.04);
+        if (this.warpTimer >= 1.5) this._enterWarpPhase('jump');
+        break;
+      }
+      case 'jump': {
+        // Brief moment of singularity — chunks blast outward at high speed
+        this._updateChunks(dt, 1.0);
+        this.chunks.forEach(c => c.userData.vel.multiplyScalar(1.06));
+        // Core implodes
+        const tj = this.warpTimer / 0.5;
+        const sz = 14 * (1 - tj) + 4;
+        this._warpCore.scale.set(sz, sz, 1);
+        this._warpCore.material.opacity = 1 - tj;
+        if (this.warpTimer >= 0.5) {
+          this._clearChunks();
+          this._enterWarpPhase('tunnel');
+        }
+        break;
+      }
+      case 'tunnel': {
+        // Hyperspace tunnel — streaks zoom past at constant high speed.
+        // Smooth ease-in for first 0.5s, hold for middle, ease-out at end.
+        const total = 5.0;
+        const t = this.warpTimer / total;
+        const intensity = t < 0.1 ? t / 0.1
+                        : t > 0.9 ? (1 - t) / 0.1
+                        : 1.0;
+        this._updateWarpStreaks(dt, intensity);
+        this._addShake(0.06 * intensity);
+        if (this.warpTimer >= total) this._enterWarpPhase('arriving');
+        break;
+      }
+      case 'arriving': {
+        // Streaks fade out, shake settles, then we exit warp and the new planet appears.
+        const t = this.warpTimer / 1.5;
+        this._updateWarpStreaks(dt, Math.max(0, 1 - t * 1.4));
+        if (this.warpTimer >= 1.5) {
+          this._exitWarp();
+        }
+        break;
+      }
+    }
+  }
+
+  _updateWarpStreaks(dt, intensity) {
+    if (!this._warpStreaks) return;
+    const camPos = this.camera.position;
+    const fwd = this._warpAxis;
+    const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0,1,0)).normalize();
+    const up = new THREE.Vector3().crossVectors(right, fwd).normalize();
+
+    const positions = this._warpStreaks.geometry.attributes.position.array;
+    const colors    = this._warpStreaks.geometry.attributes.color.array;
+    const data = this._warpStreaksData;
+
+    for (let i = 0; i < data.length; i++) {
+      const d = data[i];
+      // Streaks fly TOWARD the camera along the warp axis (negative depth direction)
+      d.depth -= dt * d.speed * (0.5 + intensity * 1.5);
+      // Recycle: when streak passes behind the camera, send it far ahead again
+      if (d.depth < -20) {
+        d.depth = rand(40, 80);
+        d.offsetAngle = Math.random() * TAU;
+        d.offsetRadius = rand(1.2, 35);
+      }
+
+      // Streaks elongate based on intensity (motion blur intensifies through warp)
+      const len = d.length * (0.5 + intensity * 2.5);
+
+      // Build start (back) and end (front) of streak in world space
+      const cosA = Math.cos(d.offsetAngle), sinA = Math.sin(d.offsetAngle);
+      const offsetVec = new THREE.Vector3(
+        right.x * cosA * d.offsetRadius + up.x * sinA * d.offsetRadius,
+        right.y * cosA * d.offsetRadius + up.y * sinA * d.offsetRadius,
+        right.z * cosA * d.offsetRadius + up.z * sinA * d.offsetRadius
+      );
+
+      const startDepth = d.depth - len;
+      const endDepth   = d.depth;
+      const startX = camPos.x + fwd.x * startDepth + offsetVec.x;
+      const startY = camPos.y + fwd.y * startDepth + offsetVec.y;
+      const startZ = camPos.z + fwd.z * startDepth + offsetVec.z;
+      const endX = camPos.x + fwd.x * endDepth + offsetVec.x;
+      const endY = camPos.y + fwd.y * endDepth + offsetVec.y;
+      const endZ = camPos.z + fwd.z * endDepth + offsetVec.z;
+
+      const j = i * 6;
+      positions[j+0] = startX; positions[j+1] = startY; positions[j+2] = startZ;
+      positions[j+3] = endX;   positions[j+4] = endY;   positions[j+5] = endZ;
+
+      // Streaks closer to the central axis are brighter and whiter
+      const proximity = 1 - Math.min(1, d.offsetRadius / 35);
+      const r = 0.6 + 0.4 * proximity;
+      const g = 0.7 + 0.3 * proximity;
+      const b = 1.0;
+      // Start of streak (back end, away from camera) is dimmer
+      colors[j+0] = r * 0.25; colors[j+1] = g * 0.35; colors[j+2] = b * 0.45;
+      // End (toward camera) is bright
+      colors[j+3] = r * 1.0;  colors[j+4] = g * 1.0;  colors[j+5] = b * 1.0;
+    }
+
+    this._warpStreaks.geometry.attributes.position.needsUpdate = true;
+    this._warpStreaks.geometry.attributes.color.needsUpdate = true;
+    this._warpStreaks.material.opacity = intensity;
+  }
+
+  /* ---------- UPDATE LOOPS ---------- */
+  _updateShips(dt) {
+    for (let i = this.ships.length - 1; i >= 0; i--) {
+      const ship = this.ships[i];
+      if (ship.hp <= 0) {
+        this._destroyShip(ship, i);
+        continue;
+      }
+
+      // Orbit motion
+      ship.orbitAngle += ship.orbitSpeed * dt;
+      const r = ship.orbitR;
+      const baseY = Math.sin(ship.orbitTilt) * r;
+      const flatR = Math.cos(ship.orbitTilt) * r;
+      const x = flatR * Math.cos(ship.orbitAngle);
+      const z = flatR * Math.sin(ship.orbitAngle);
+      const bobY = Math.sin(this.gameTime * 0.6 + ship.bobPhase) * 0.4;
+      ship.mesh.position.set(x, baseY + bobY, z);
+      // Look along velocity tangent (perpendicular to radius)
+      const tangent = new THREE.Vector3(-Math.sin(ship.orbitAngle), 0, Math.cos(ship.orbitAngle));
+      if (ship.orbitSpeed < 0) tangent.negate();
+      const lookTarget = ship.mesh.position.clone().add(tangent);
+      ship.mesh.lookAt(lookTarget);
+      // lookAt makes -Z face the target. Our hull is built along +X, so swing 90° to align +X with motion
+      ship.mesh.rotateY(Math.PI / 2);
+      // Banking around forward (+X after the swing)
+      ship.mesh.rotateX(Math.sin(this.gameTime * 0.3 + ship.bobPhase) * 0.06);
+
+      // Animate flame thrusters — pulse + flicker. Plumes are 3D Meshes oriented along
+      // ship's local +X (axis-aligned). Scale.y stretches along the cylinder's length
+      // (which after the -PI/2 Z-rotation maps to world +X = the flame's length direction).
+      // Scale.x and scale.z handle width wobble.
+      if (ship.mesh.userData.thrusters) {
+        const intensify = ship.userData_warpIntensify || 1;  // boosted during warp charge
+        for (const tr of ship.mesh.userData.thrusters) {
+          const pulse = 1 + 0.15 * Math.sin(this.gameTime * 12 + tr.phase);
+          const flick = 1 + (Math.random() - 0.5) * 0.18;
+          const k = pulse * flick * intensify;
+          const w = (0.95 + Math.random() * 0.1) * Math.sqrt(intensify);
+          tr.flame.scale.set(w, k, w);
+          tr.core.scale.set(w * 0.95, k * 1.05, w * 0.95);
+          tr.flame.material.opacity = 0.65 + 0.15 * Math.sin(this.gameTime * 9 + tr.phase);
+          tr.core.material.opacity  = 0.85 + 0.10 * Math.sin(this.gameTime * 14 + tr.phase);
+        }
+      }
+
+      // ============ FIRE CONTROL ============
+      // No firing during warp — there's no planet to target.
+      if (this.warpState !== 'idle') continue;
+
+      if (ship.fireMode === 'volley') {
+        // Heavies: fire all main guns within volleySpread sec, then long reload.
+        if (ship.volleyActive) {
+          ship.volleyShotTimer -= dt;
+          if (ship.volleyShotTimer <= 0) {
+            // Fire next gun in sequence
+            if (ship.volleyShotIdx < ship.muzzles.length) {
+              const m = ship.muzzles[ship.volleyShotIdx];
+              this._fireShipProjectile(ship, { muzzle: m });
+              ship.volleyShotIdx++;
+              const remaining = ship.muzzles.length - ship.volleyShotIdx;
+              ship.volleyShotTimer = remaining > 0
+                ? (ship.cfg.volleySpread / ship.muzzles.length) * (0.8 + Math.random() * 0.4)
+                : 0;
+            } else {
+              // Volley complete — start reload
+              ship.volleyActive = false;
+              ship.volleyShotIdx = 0;
+              ship.volleyTimer = ship.cfg.volleyInterval * (0.85 + Math.random() * 0.3);
+            }
+          }
+        } else {
+          ship.volleyTimer -= dt;
+          if (ship.volleyTimer <= 0) {
+            ship.volleyActive = true;
+            ship.volleyShotIdx = 0;
+            ship.volleyShotTimer = 0;
+            // First volley shot fires immediately on next frame
+            this._toast(`${ship.cfg.code} OPENS FIRE`, 'good', 1200);
+          }
+        }
+      } else {
+        // Cruisers/destroyers: continuous random fire at fireRate
+        ship.fireTimer -= dt;
+        if (ship.fireTimer <= 0) {
+          this._fireShipProjectile(ship);
+          ship.fireTimer = (1 / ship.fireRate) * (0.8 + Math.random() * 0.4);
+        }
+      }
+    }
+  }
+
+  _updateTurrets(dt) {
+    for (let i = this.turrets.length - 1; i >= 0; i--) {
+      const turret = this.turrets[i];
+      if (turret.hp <= 0) {
+        this._destroyTurret(turret, i);
+        continue;
+      }
+
+      // Find nearest in-range ship
+      let nearest = null, nearestDist = Infinity;
+      const turretWorld = new THREE.Vector3();
+      turret.mesh.getWorldPosition(turretWorld);
+      this.ships.forEach(s => {
+        const sw = new THREE.Vector3();
+        s.mesh.getWorldPosition(sw);
+        const d = turretWorld.distanceTo(sw);
+        if (d < turret.range && d < nearestDist) {
+          nearest = s; nearestDist = d;
+        }
+      });
+
+      turret.target = nearest;
+      if (nearest) {
+        // Aim — proper yaw + pitch on the aim group (Euler order YZX so yaw applies first)
+        const targetPos = new THREE.Vector3();
+        nearest.mesh.getWorldPosition(targetPos);
+        const localTarget = turret.mesh.worldToLocal(targetPos.clone());
+        // Yaw: rotate so aim's +X (gun forward) points at target's horizontal projection.
+        // After Y rotation by θ, local +X → (cosθ, 0, -sinθ). Solve for direction (x, _, z): θ = atan2(-z, x)
+        const yaw = Math.atan2(-localTarget.z, localTarget.x);
+        // Pitch: elevate gun upward toward target. Positive Z rotation tilts +X toward +Y.
+        const horiz = Math.sqrt(localTarget.x*localTarget.x + localTarget.z*localTarget.z);
+        const pitch = Math.atan2(localTarget.y, horiz);
+        turret.aim.rotation.y = yaw;
+        turret.aim.rotation.z = pitch;
+
+        // Fire
+        turret.fireTimer -= dt;
+        if (turret.fireTimer <= 0) {
+          this._fireTurretProjectile(turret);
+          turret.fireTimer = 1 / turret.fireRate;
+        }
+      }
+    }
+  }
+
+  _updateProjectiles(dt) {
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const p = this.projectiles[i];
+      p.life += dt;
+      p.pos.add(p.vel.clone().multiplyScalar(dt));
+      // Streak's front face stays at p.pos; trail extends behind along velocity.
+      p.mesh.position.copy(p.pos).sub(p.streakDir.clone().multiplyScalar(p.streakLen * 0.5));
+      p.glow.position.copy(p.pos);
+
+      // Smoke trail emission
+      p.trailTimer -= dt;
+      if (p.trailTimer <= 0) {
+        p.trailTimer = p.trailRate;
+        this._spawnTrailPuff(p.pos, p.trailColor, p.trailSize);
+      }
+
+      let hit = false;
+      // Ship-fired hits planet?
+      if (p.fromShip) {
+        const dToPlanet = p.pos.distanceTo(this.planetGroup.position);
+        if (dToPlanet < this.planetRadius) {
+          const surfacePoint = p.pos.clone().sub(this.planetGroup.position).normalize().multiplyScalar(this.planetRadius * 1.01).add(this.planetGroup.position);
+          this._damagePlanet(p.damage, surfacePoint, p.sourceShip);
+          this.turrets.forEach(t => {
+            const tw = new THREE.Vector3();
+            t.mesh.getWorldPosition(tw);
+            if (tw.distanceTo(surfacePoint) < 0.6) {
+              t.hp -= p.damage * 0.5;
+            }
+          });
+          hit = true;
+        }
+      } else {
+        // Turret-fired hits ship?
+        if (p.target && this.ships.includes(p.target)) {
+          const tw = new THREE.Vector3();
+          p.target.mesh.getWorldPosition(tw);
+          if (p.pos.distanceTo(tw) < p.target.cfg.length * 0.5) {
+            p.target.hp -= p.damage;
+            this._spawnExplosion(p.pos.clone(), 0.55, 0x88ffaa, false);
+            // Spark shower
+            for (let j = 0; j < 3; j++) {
+              this._spawnTrailPuff(
+                p.pos.clone().add(new THREE.Vector3(rand(-0.2,0.2), rand(-0.2,0.2), rand(-0.2,0.2))),
+                0xffcc88, 0.35
+              );
+            }
+            this.audio.shipHit();
+            hit = true;
+          }
+        }
+      }
+
+      if (hit || p.life > p.maxLife) {
+        this.scene.remove(p.mesh);
+        this.scene.remove(p.glow);
+        if (p.mesh.geometry) p.mesh.geometry.dispose();
+        if (p.mesh.material) p.mesh.material.dispose();
+        if (p.glow.material) p.glow.material.dispose();
+        this.projectiles.splice(i, 1);
+      }
+    }
+  }
+
+  _updateParticles(dt) {
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.life += dt;
+      const t = p.life / p.maxLife;
+      if (t >= 1) {
+        this.scene.remove(p.mesh);
+        if (p.type === 'shard') {
+          // Geometry is shared (this._shardGeo) — never dispose it.
+          // Material is shared per-explosion: only dispose on the last shard.
+          if (p.isLastShard && p.sharedMat) p.sharedMat.dispose();
+        } else {
+          if (p.mesh.geometry) p.mesh.geometry.dispose();
+          if (p.mesh.material) p.mesh.material.dispose();
+        }
+        this.particles.splice(i, 1);
+        continue;
+      }
+      if (p.type === 'fireball') {
+        p.mesh.material.opacity = 1 - t;
+        const s = lerp(p.startScale, p.endScale, t);
+        p.mesh.scale.set(s, s, 1);
+      } else if (p.type === 'puff') {
+        p.mesh.material.opacity = 1 - t;
+        const s = lerp(p.startScale, p.endScale, t);
+        p.mesh.scale.set(s, s, 1);
+      } else if (p.type === 'shard') {
+        p.mesh.position.add(p.vel.clone().multiplyScalar(dt));
+        p.vel.multiplyScalar(0.985);
+        p.mesh.rotateOnAxis(p.rotAxis, p.rotSpeed * dt);
+        // Fade only the shared material once (when first shard processes this frame).
+        if (p.sharedMat) p.sharedMat.opacity = 1 - t;
+      }
+    }
+  }
+
+  _updateCamera(dt) {
+    // ============ BRIDGE VIEW ============
+    if (this.cameraMode === 'bridge' && this.bridgeShip && this.ships.includes(this.bridgeShip)) {
+      const ship = this.bridgeShip;
+
+      // Compute world-space bridge anchor on the ship
+      const bridgePos = new THREE.Vector3(ship.bridgeAnchor.x, ship.bridgeAnchor.y, ship.bridgeAnchor.z);
+      ship.mesh.localToWorld(bridgePos);
+
+      // Camera sits at the bridge, looks toward the planet center
+      // (offset slightly back from the bridge so we see some of the ship's bow & deck guns)
+      const lookTarget = this.planetGroup.position;
+      const fwd = new THREE.Vector3().subVectors(lookTarget, bridgePos).normalize();
+      // Pull camera back along the negative forward axis just a touch so we see deck guns ahead
+      const camPos = bridgePos.clone().sub(fwd.clone().multiplyScalar(ship.cfg.length * 0.08));
+      // Lift camera a tiny bit so we look "down" at the deck and out to the planet
+      camPos.y += ship.cfg.height * 0.15;
+
+      // Allow the player to look around. The thumbsticks / arrow keys / WASD work as
+      // RATE controllers — push and hold to keep tilting; release to lock at current angle.
+      // Right stick Y is FOV zoom (telephoto / binoculars effect).
+      const lookRate   = 1.6;       // rad/s yaw
+      const lookRateY  = 1.2;       // rad/s pitch
+      let dYaw   = (this.input.stickL.x || 0) * lookRate;
+      let dPitch = (this.input.stickL.y || 0) * lookRateY;
+      // Keyboard fallback for desktop
+      if (this.input.keys['a'] || this.input.keys['ArrowLeft'])  dYaw   -= lookRate;
+      if (this.input.keys['d'] || this.input.keys['ArrowRight']) dYaw   += lookRate;
+      if (this.input.keys['w'] || this.input.keys['ArrowUp'])    dPitch += lookRateY;
+      if (this.input.keys['s'] || this.input.keys['ArrowDown'])  dPitch -= lookRateY;
+
+      this._bridgeYaw   = clamp((this._bridgeYaw   || 0) + dYaw   * dt, -1.4, 1.4);
+      this._bridgePitch = clamp((this._bridgePitch || 0) + dPitch * dt, -0.7, 0.7);
+
+      // FOV zoom (right stick Y or Q/E)
+      let fovDelta = -(this.input.stickR.y || 0) * 35;   // stick up → smaller FOV (zoom in)
+      if (this.input.keys['q']) fovDelta -= 30;
+      if (this.input.keys['e']) fovDelta += 30;
+      const targetFov = clamp(55 + fovDelta, 18, 80);
+      this.camera.fov = lerp(this.camera.fov, targetFov, 0.12);
+      this.camera.updateProjectionMatrix();
+
+      // Build look target — fwd is direction to planet center, we offset it by our look angles
+      const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0,1,0)).normalize();
+      const up    = new THREE.Vector3().crossVectors(right, fwd).normalize();
+      // Use sin/tan for proper angular projection at any FOV
+      const yaw   = this._bridgeYaw;
+      const pitch = this._bridgePitch;
+      const aimDir = fwd.clone()
+        .applyAxisAngle(up, -yaw)         // yaw around world up axis (player's "left/right look")
+        .applyAxisAngle(right, pitch);    // pitch around camera right (player's "up/down look")
+      const aimTargetFar = camPos.clone().add(aimDir.multiplyScalar(60));
+
+      this.camera.position.copy(camPos);
+      this.camera.up.set(0, 1, 0);
+      this.camera.lookAt(aimTargetFar);
+      this._applyShake();
+
+      // Update atmosphere uniform
+      if (this.atmosphere) {
+        this.atmosphere.material.uniforms.viewVector.value.copy(
+          new THREE.Vector3().subVectors(this.camera.position, this.atmosphere.position)
+        );
+      }
+      return;
+    }
+
+    // If the bridge ship died while we were watching, drop back to orbit cam
+    if (this.cameraMode === 'bridge' && this.bridgeShip && !this.ships.includes(this.bridgeShip)) {
+      this._exitBridge();
+      this._toast('BRIDGE LOST — RETURNING TO ORBITAL VIEW', 'warn');
+    }
+
+    // ============ WARP TUNNEL CAMERA ============
+    // During the tunnel/jump/arriving phases, override the orbital camera with a
+    // forward-flying cinematic shot. We lock onto the warp axis and accelerate / decelerate.
+    if (this.warpState === 'jump' || this.warpState === 'tunnel' || this.warpState === 'arriving') {
+      // Smoothly continue from the orbital position at the moment we entered jump.
+      // The camera moves forward along _warpAxis at varying speed depending on phase.
+      let speed = 0;
+      if (this.warpState === 'jump')     speed = 6;        // initial lurch
+      if (this.warpState === 'tunnel')   speed = 35;       // hyperspace
+      if (this.warpState === 'arriving') speed = lerp(35, 0, this.warpTimer / 1.5);   // decelerate
+      this.camera.position.add(this._warpAxis.clone().multiplyScalar(speed * dt));
+      this.camera.lookAt(this.camera.position.clone().add(this._warpAxis));
+      // Subtle roll for warp drama
+      this.camera.rotateZ(Math.sin(this.gameTime * 1.3) * 0.025);
+      this._applyShake();
+      // Atmosphere uniform still wants a viewVector so the planet halo (when revealed) is correct
+      if (this.atmosphere) {
+        this.atmosphere.material.uniforms.viewVector.value.copy(
+          new THREE.Vector3().subVectors(this.camera.position, this.atmosphere.position)
+        );
+      }
+      return;
+    }
+
+    // ============ ORBITAL VIEW (default — also covers 'aftermath' and 'charging') ============
+    // Apply input
+    const sens = 1.4;
+    this.camState.azimuth   += this.input.stickL.x * sens * dt;
+    this.camState.elevation -= this.input.stickL.y * sens * dt;
+    this.camState.elevation = clamp(this.camState.elevation, -1.3, 1.3);
+
+    // Right stick: Y zooms (desired distance), X tilts roll a bit
+    this.camState.targetDistance += this.input.stickR.y * 18 * dt;
+    this.camState.targetDistance = clamp(this.camState.targetDistance, 14, 70);
+    this.camState.tilt = lerp(this.camState.tilt, this.input.stickR.x * 0.18, 0.06);
+
+    // Keyboard
+    if (this.input.keys['a'] || this.input.keys['ArrowLeft']) this.camState.azimuth -= 1.2 * dt;
+    if (this.input.keys['d'] || this.input.keys['ArrowRight']) this.camState.azimuth += 1.2 * dt;
+    if (this.input.keys['w'] || this.input.keys['ArrowUp']) this.camState.elevation += 1.2 * dt;
+    if (this.input.keys['s'] || this.input.keys['ArrowDown']) this.camState.elevation -= 1.2 * dt;
+    if (this.input.keys['q']) this.camState.targetDistance -= 18 * dt;
+    if (this.input.keys['e']) this.camState.targetDistance += 18 * dt;
+    this.camState.elevation = clamp(this.camState.elevation, -1.3, 1.3);
+    this.camState.targetDistance = clamp(this.camState.targetDistance, 14, 70);
+
+    // Smooth distance
+    this.camState.distance = lerp(this.camState.distance, this.camState.targetDistance, 0.08);
+
+    const r = this.camState.distance;
+    const e = this.camState.elevation;
+    const a = this.camState.azimuth;
+    const x = r * Math.cos(e) * Math.sin(a);
+    const y = r * Math.sin(e);
+    const z = r * Math.cos(e) * Math.cos(a);
+
+    this.camera.position.set(x, y, z);
+    this.camera.lookAt(this.planetGroup.position);
+    // Apply roll/tilt
+    this.camera.rotateZ(this.camState.tilt);
+    // Apply impact shake (decays each frame)
+    this._applyShake();
+
+    // Update atmosphere uniform
+    if (this.atmosphere) {
+      this.atmosphere.material.uniforms.viewVector.value.copy(
+        new THREE.Vector3().subVectors(this.camera.position, this.atmosphere.position)
+      );
+    }
+
+    // Update floating ship card position (must be done in render loop after camera moves)
+    if (this.selectedShip && this.ships.includes(this.selectedShip)) {
+      this._updateShipCard();
+    } else if (this.selectedShip && !this.ships.includes(this.selectedShip)) {
+      // Selected ship was destroyed — close the card
+      this._closeShipCard();
+    }
+  }
+
+  _passiveResources(dt) {
+    // Slow trickle income
+    this.state.resources += dt * (3 + this.state.planetLevel * 0.5);
+  }
+
+  /* ---------- INPUT ---------- */
+  _initInput() {
+    // Touch sticks
+    this._setupStick('stick-left', this.input.stickL);
+    this._setupStick('stick-right', this.input.stickR);
+
+    // Tap detection — distinguish from drag-orbit. Track press start; if release happens
+    // within ~250ms and within 14px of start, treat as a tap → raycast → ship select.
+    let pressX = 0, pressY = 0, pressT = 0, pressActive = false;
+    const TAP_MS = 280;
+    const TAP_PX = 16;
+
+    const onPress = (clientX, clientY) => {
+      pressX = clientX; pressY = clientY;
+      pressT = performance.now();
+      pressActive = true;
+    };
+    const onRelease = (clientX, clientY) => {
+      if (!pressActive) return;
+      pressActive = false;
+      const dx = Math.abs(clientX - pressX);
+      const dy = Math.abs(clientY - pressY);
+      const dt = performance.now() - pressT;
+      if (dt < TAP_MS && dx < TAP_PX && dy < TAP_PX) {
+        this._handleTap(clientX, clientY);
+      }
+    };
+    const onMove = () => { /* drag is handled elsewhere; we just need press/release */ };
+
+    this.canvas.addEventListener('touchstart', e => {
+      // Only count single-finger taps (multi-touch is camera-zoom etc.)
+      if (e.touches.length === 1) onPress(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: true });
+    this.canvas.addEventListener('touchmove', () => { /* drag detection above */ }, { passive: true });
+    this.canvas.addEventListener('touchend', e => {
+      const t = e.changedTouches[0];
+      if (t) onRelease(t.clientX, t.clientY);
+    }, { passive: true });
+    this.canvas.addEventListener('touchcancel', () => { pressActive = false; }, { passive: true });
+
+    // Mouse drag (desktop) — drag anywhere not on UI. Also wire up press/release for tap detection.
+    this.canvas.addEventListener('mousedown', e => {
+      this.input.mouseDown = true;
+      this.input.lastMouseX = e.clientX;
+      this.input.lastMouseY = e.clientY;
+      onPress(e.clientX, e.clientY);
+    });
+    window.addEventListener('mouseup', e => {
+      this.input.mouseDown = false;
+      onRelease(e.clientX, e.clientY);
+    });
+    window.addEventListener('mousemove', e => {
+      if (!this.input.mouseDown) return;
+      const dx = e.clientX - this.input.lastMouseX;
+      const dy = e.clientY - this.input.lastMouseY;
+      this.input.lastMouseX = e.clientX;
+      this.input.lastMouseY = e.clientY;
+      this.camState.azimuth += dx * 0.005;
+      this.camState.elevation -= dy * 0.005;
+      this.camState.elevation = clamp(this.camState.elevation, -1.3, 1.3);
+    });
+    this.canvas.addEventListener('wheel', e => {
+      e.preventDefault();
+      this.camState.targetDistance += e.deltaY * 0.03;
+      this.camState.targetDistance = clamp(this.camState.targetDistance, 14, 70);
+    }, { passive: false });
+
+    // Keyboard
+    window.addEventListener('keydown', e => {
+      this.input.keys[e.key] = true;
+      if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+        // ESC also exits bridge view
+        if (this.cameraMode === 'bridge') { this._exitBridge(); return; }
+        this._togglePause();
+      }
+      if (e.key === 'b' || e.key === 'B') this._openBuildMenu();
+    });
+    window.addEventListener('keyup', e => { this.input.keys[e.key] = false; });
+
+    // Card buttons
+    document.getElementById('ship-card-close').addEventListener('click', e => {
+      e.stopPropagation();
+      this._closeShipCard();
+    });
+    document.getElementById('ship-card-bridge').addEventListener('click', e => {
+      e.stopPropagation();
+      if (this.selectedShip) this._enterBridge(this.selectedShip);
+    });
+    document.getElementById('exit-bridge-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      this._exitBridge();
+    });
+  }
+
+  /* ---------- TAP & SHIP SELECT ---------- */
+  _handleTap(clientX, clientY) {
+    // Don't treat as a ship-select tap if we're in bridge view (canvas tap exits bridge).
+    if (this.cameraMode === 'bridge') {
+      this._exitBridge();
+      return;
+    }
+    // Build a ray from screen point through camera
+    if (!this._raycaster) this._raycaster = new THREE.Raycaster();
+    const rect = this.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1
+    );
+    this._raycaster.setFromCamera(ndc, this.camera);
+    // Test against ship hitboxes only (cheap, generous)
+    const hitboxes = this.ships.map(s => s.mesh.userData.hitbox).filter(Boolean);
+    const hits = this._raycaster.intersectObjects(hitboxes, false);
+    if (hits.length === 0) {
+      this._closeShipCard();
+      return;
+    }
+    // Find which ship this hitbox belongs to
+    const hitObj = hits[0].object;
+    const ship = this.ships.find(s => s.mesh.userData.hitbox === hitObj);
+    if (ship) this._openShipCard(ship);
+  }
+
+  _openShipCard(ship) {
+    this.selectedShip = ship;
+    const card = document.getElementById('ship-card');
+    document.getElementById('ship-card-code').textContent = ship.cfg.code;
+    document.getElementById('ship-card-name').textContent = ship.cfg.name;
+    this._updateShipCard();
+    card.classList.add('show');
+    this.audio.ui(880);
+  }
+
+  _updateShipCard() {
+    if (!this.selectedShip) return;
+    const ship = this.selectedShip;
+    const card = document.getElementById('ship-card');
+    if (!card.classList.contains('show')) return;
+    // HP bar
+    const hpPct = clamp(ship.hp / ship.maxHp, 0, 1);
+    document.getElementById('ship-card-hp').style.width = (hpPct * 100).toFixed(0) + '%';
+    document.getElementById('ship-card-hp-num').textContent = `${Math.max(0,Math.ceil(ship.hp))}/${ship.maxHp}`;
+    // Stats
+    const fireDesc = ship.fireMode === 'volley'
+      ? `<span>VOLLEY</span> · ${ship.cfg.volleyInterval.toFixed(1)}s reload`
+      : `<span>RAPID</span> · ${ship.fireRate.toFixed(1)}/s`;
+    document.getElementById('ship-card-stats').innerHTML = `
+      DPS <span>${ship.dps}</span> &nbsp;·&nbsp;
+      RANGE <span>${ship.range}</span><br>
+      FIRE: ${fireDesc}<br>
+      <em style="color:var(--amber-dim)">${ship.cfg.desc}</em>
+    `;
+
+    // Position card above ship in screen space
+    const wp = new THREE.Vector3();
+    ship.mesh.getWorldPosition(wp);
+    // Offset above the ship
+    wp.y += ship.cfg.height * 2.2;
+    const sp = wp.project(this.camera);
+    // If ship is behind camera, hide
+    if (sp.z > 1) {
+      card.style.opacity = '0';
+      return;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    const x = (sp.x * 0.5 + 0.5) * rect.width + rect.left;
+    const y = (-sp.y * 0.5 + 0.5) * rect.height + rect.top - 14;  // 14px gap above
+    // Clamp to viewport so card never falls off-screen
+    const clamped = clamp(x, 120, window.innerWidth - 120);
+    card.style.left = clamped + 'px';
+    card.style.top = clamp(y, 70, window.innerHeight - 200) + 'px';
+    card.style.opacity = '1';
+  }
+
+  _closeShipCard() {
+    this.selectedShip = null;
+    document.getElementById('ship-card').classList.remove('show');
+  }
+
+  /* ---------- BRIDGE VIEW ---------- */
+  _enterBridge(ship) {
+    this.cameraMode = 'bridge';
+    this.bridgeShip = ship;
+    this._closeShipCard();
+    document.getElementById('exit-bridge-btn').classList.add('show');
+    document.getElementById('bridge-marker').classList.add('show');
+    // Reset look angles + FOV when entering
+    this._bridgeYaw = 0;
+    this._bridgePitch = 0;
+    this._origFov = this._origFov || this.camera.fov;
+    this.camera.fov = 55;
+    this.camera.updateProjectionMatrix();
+    // Relabel sticks for the new control mapping
+    document.querySelector('#stick-left .stick-label').textContent = 'LOOK';
+    document.querySelector('#stick-right .stick-label').textContent = 'ZOOM';
+    this._toast(`BRIDGE: ${ship.cfg.code} ${ship.cfg.name}`, 'good');
+  }
+
+  _exitBridge() {
+    this.cameraMode = 'orbit';
+    this.bridgeShip = null;
+    document.getElementById('exit-bridge-btn').classList.remove('show');
+    document.getElementById('bridge-marker').classList.remove('show');
+    // Restore default FOV
+    if (this._origFov) {
+      this.camera.fov = this._origFov;
+      this.camera.updateProjectionMatrix();
+    }
+    // Restore stick labels
+    document.querySelector('#stick-left .stick-label').textContent = 'ORBIT';
+    document.querySelector('#stick-right .stick-label').textContent = 'RANGE / TILT';
+  }
+
+  _setupStick(elId, state) {
+    const zone = document.getElementById(elId);
+    const knob = zone.querySelector('.stick-knob');
+    const radius = 50;
+    const onStart = (e) => {
+      e.preventDefault();
+      const t = e.changedTouches ? e.changedTouches[0] : e;
+      state.active = true;
+      state.id = e.changedTouches ? t.identifier : 'mouse';
+      state.cx = zone.getBoundingClientRect().left + zone.offsetWidth/2;
+      state.cy = zone.getBoundingClientRect().top + zone.offsetHeight/2;
+      onMove(e);
+    };
+    const onMove = (e) => {
+      if (!state.active) return;
+      let touch;
+      if (e.changedTouches) {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          if (e.changedTouches[i].identifier === state.id) { touch = e.changedTouches[i]; break; }
+        }
+        if (!touch) return;
+      } else {
+        touch = e;
+      }
+      let dx = touch.clientX - state.cx;
+      let dy = touch.clientY - state.cy;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d > radius) { dx = dx/d * radius; dy = dy/d * radius; }
+      knob.style.transform = `translate(${dx}px, ${dy}px)`;
+      state.x = dx / radius;
+      state.y = dy / radius;
+    };
+    const onEnd = (e) => {
+      if (!state.active) return;
+      if (e.changedTouches) {
+        let found = false;
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          if (e.changedTouches[i].identifier === state.id) { found = true; break; }
+        }
+        if (!found) return;
+      }
+      state.active = false; state.id = null;
+      state.x = 0; state.y = 0;
+      knob.style.transform = 'translate(0,0)';
+    };
+    zone.addEventListener('touchstart', onStart, { passive: false });
+    zone.addEventListener('touchmove', onMove, { passive: false });
+    zone.addEventListener('touchend', onEnd);
+    zone.addEventListener('touchcancel', onEnd);
+    zone.addEventListener('mousedown', onStart);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onEnd);
+  }
+
+  /* ---------- UI ---------- */
+  _initUI() {
+    document.getElementById('start-btn').addEventListener('click', () => {
+      this.audio.init();
+      this.audio.resume();
+      document.getElementById('boot').style.display = 'none';
+      this.running = true;
+      // Spawn 1 free starter cruiser
+      this._spawnShip('cruiser');
+      this.clock.start();
+      this._loop();
+    });
+
+    document.getElementById('build-btn').addEventListener('click', () => this._openBuildMenu());
+    document.getElementById('close-build').addEventListener('click', () => this._closeBuildMenu());
+    document.getElementById('build-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'build-modal') this._closeBuildMenu();
+    });
+
+    document.getElementById('pause-btn').addEventListener('click', () => this._togglePause());
+    document.getElementById('resume-btn').addEventListener('click', () => this._togglePause());
+    document.getElementById('restart-btn').addEventListener('click', () => location.reload());
+
+    // Boot terminal lines
+    const lines = [
+      '> uplink to OSC HQ ............ ESTABLISHED',
+      '> stellar nav lock ............ ACQUIRED',
+      '> hostile orbital target ...... CONFIRMED',
+      '> shipyard available .......... CRUISER, DESTROYER, BATTLESHIP, DREADNOUGHT',
+      '> standing by for command authority.'
+    ];
+    const term = document.getElementById('terminal');
+    lines.forEach((l, i) => {
+      const div = document.createElement('div');
+      div.className = 'line';
+      div.style.animationDelay = (0.2 + i*0.35) + 's';
+      div.textContent = l;
+      term.appendChild(div);
+    });
+  }
+
+  _buildShipMenu() {
+    const list = document.getElementById('ship-list');
+    list.innerHTML = '';
+    Object.values(SHIP_TIERS).forEach(cfg => {
+      const card = document.createElement('div');
+      card.className = 'ship-card';
+      card.dataset.tier = cfg.id;
+      card.innerHTML = `
+        <div class="ship-icon">${cfg.code}</div>
+        <div class="ship-info">
+          <div class="ship-name">${cfg.name}</div>
+          <div class="ship-stats">HULL ${cfg.hull} · DPS ${cfg.dps} · TURRETS ${cfg.turrets}</div>
+        </div>
+        <div class="ship-cost">
+          <div class="num">${cfg.cost}</div>
+          <div class="lbl">SCRAP</div>
+        </div>
+      `;
+      card.addEventListener('click', () => {
+        if (this.state.resources >= cfg.cost) {
+          this._spawnShip(cfg.id);
+          this._refreshShipMenu();
+        } else {
+          this._toast('INSUFFICIENT SCRAP', 'warn');
+          this.audio.ui(220);
+        }
+      });
+      list.appendChild(card);
+    });
+    this._refreshShipMenu();
+  }
+
+  _refreshShipMenu() {
+    document.querySelectorAll('.ship-card').forEach(card => {
+      const cfg = SHIP_TIERS[card.dataset.tier];
+      if (this.state.resources >= cfg.cost) {
+        card.classList.add('affordable'); card.classList.remove('locked');
+      } else {
+        card.classList.remove('affordable'); card.classList.add('locked');
+      }
+    });
+  }
+
+  _openBuildMenu() {
+    document.getElementById('build-modal').classList.add('show');
+    this._refreshShipMenu();
+    this.audio.ui(880);
+  }
+  _closeBuildMenu() {
+    document.getElementById('build-modal').classList.remove('show');
+    this.audio.ui(440);
+  }
+
+  _togglePause() {
+    this.paused = !this.paused;
+    document.getElementById('pause-overlay').classList.toggle('show', this.paused);
+    if (!this.paused) this.clock.start();
+  }
+
+  _toast(msg, kind = '', durationMs = 2200) {
+    const t = document.createElement('div');
+    t.className = 'toast' + (kind ? ' ' + kind : '');
+    t.textContent = msg;
+    const wrap = document.getElementById('toasts');
+    wrap.appendChild(t);
+    setTimeout(() => t.remove(), durationMs);
+  }
+
+  _updateHUD() {
+    const pct = clamp(this.state.planetHP / this.state.planetMaxHP, 0, 1);
+    document.getElementById('hp-fill').style.width = (pct*100).toFixed(1) + '%';
+    document.getElementById('hp-text').textContent = `INTEGRITY: ${Math.max(0, Math.floor(pct*100))}%`;
+    document.getElementById('planet-level').textContent = `SECTOR ${String(this.state.planetLevel).padStart(2,'0')} · ${this.turrets.length} BATTERIES`;
+    document.getElementById('resource-val').textContent = Math.floor(this.state.resources);
+    document.getElementById('fleet-val').textContent = this.state.fleet;
+    // Procedural planet name
+    const names = ['KEPLER-7B','VEGA-IX','ORION-3','HELIOS-PRIME','TITANIA','CYGNUS-X1','ALCYONE','RIGEL-IV','PROCYON','ATLAS-VII','POLLUX-9'];
+    const name = names[(this.state.planetLevel - 1) % names.length];
+    document.getElementById('planet-name').textContent = name;
+  }
+
+  _onResize() {
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  /* ---------- LOOP ---------- */
+  _loop() {
+    requestAnimationFrame(() => this._loop());
+    if (!this.running) return;
+    let dt = this.clock.getDelta();
+    if (this.paused) dt = 0;
+    dt = Math.min(dt, 0.05); // cap big stalls
+    this.gameTime += dt;
+
+    // Slowly rotate planet
+    if (this.planetGroup) this.planetGroup.rotation.y += dt * 0.04;
+
+    if (!this.paused) {
+      this._passiveResources(dt);
+      // During warp: ships still animate (thruster boost is part of the show), but
+      // turrets are gone with the planet, and projectiles were cleared at warp start.
+      this._updateShips(dt);
+      if (this.warpState === 'idle') {
+        this._updateTurrets(dt);
+        this._updateProjectiles(dt);
+      }
+      this._updateParticles(dt);
+      this._updateWarp(dt);
+    }
+    this._updateCamera(dt);
+
+    // Periodic HUD refresh (cheap)
+    if (Math.floor(this.gameTime * 4) !== this._lastHudTick) {
+      this._lastHudTick = Math.floor(this.gameTime * 4);
+      this._updateHUD();
+      this._refreshShipMenu();
+    }
+
+    // Rotate starfield very slowly opposite camera for parallax illusion
+    if (this.starfield) {
+      this.starfield.rotation.y -= dt * 0.003;
+    }
+
+    this.renderer.render(this.scene, this.camera);
+  }
+}
+
+// Boot
+window.addEventListener('load', () => {
+  window.game = new Game();
+});
+</script>
+
+</body>
+</html>
