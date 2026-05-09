@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <pattern id="scanlines" width="1" height="3" patternUnits="userSpaceOnUse">
+      <rect width="1" height="1" fill="#ffaa33" fill-opacity="0.025"/>
+    </pattern>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffaa33" stop-opacity="0.22"/>
+      <stop offset="60%" stop-color="#ffaa33" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#ffaa33" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="#080604"/>
+  <rect width="1024" height="1024" fill="url(#glow)"/>
+  <rect width="1024" height="1024" fill="url(#scanlines)"/>
+
+  <!-- Hex frame: outer thick + inner thin double-line -->
+  <polygon points="512,72 893,292 893,732 512,952 131,732 131,292"
+           fill="none" stroke="#ffaa33" stroke-width="14" stroke-linejoin="miter"/>
+  <polygon points="512,108 858,308 858,716 512,916 166,716 166,308"
+           fill="#ffaa33" fill-opacity="0.04" stroke="#ffaa33" stroke-width="2" stroke-opacity="0.55"/>
+
+  <!-- Corner brackets echo the in-game HUD -->
+  <g stroke="#ffaa33" stroke-width="6" fill="none">
+    <path d="M 280 240 L 230 240 L 230 290"/>
+    <path d="M 744 240 L 794 240 L 794 290"/>
+    <path d="M 280 780 L 230 780 L 230 730"/>
+    <path d="M 744 780 L 794 780 L 794 730"/>
+  </g>
+
+  <!-- ============ BATTLESHIP SILHOUETTE (right-facing) ============ -->
+  <!-- Sized larger and centered vertically since there's no wordmark crowding it -->
+  <g fill="#fff5e0">
+    <path d="M 200 615 L 200 580 L 220 565 L 800 565 L 850 580 L 850 615 Z"/>
+    <rect x="220" y="550" width="610" height="18"/>
+    <rect x="660" y="536" width="170" height="16"/>
+    <!-- Aft turret -->
+    <rect x="280" y="518" width="58" height="22"/>
+    <rect x="222" y="521" width="60" height="3"/>
+    <rect x="222" y="527" width="60" height="3"/>
+    <rect x="222" y="533" width="60" height="3"/>
+    <!-- Aft super -->
+    <rect x="360" y="518" width="40" height="22"/>
+    <!-- Funnel -->
+    <rect x="440" y="480" width="58" height="60"/>
+    <rect x="432" y="474" width="74" height="8"/>
+    <!-- Pagoda mast tiers -->
+    <rect x="528" y="480" width="100" height="58"/>
+    <rect x="540" y="448" width="76" height="32"/>
+    <rect x="552" y="418" width="52" height="30"/>
+    <rect x="564" y="390" width="28" height="28"/>
+    <!-- Mast/yardarm/spike -->
+    <rect x="576" y="325" width="4" height="65"/>
+    <rect x="558" y="360" width="40" height="3"/>
+    <polygon points="578,300 572,328 584,328"/>
+    <!-- Forward turret #1 (raised) -->
+    <rect x="680" y="515" width="58" height="22"/>
+    <rect x="738" y="518" width="60" height="3"/>
+    <rect x="738" y="524" width="60" height="3"/>
+    <rect x="738" y="530" width="60" height="3"/>
+    <!-- Forward turret #2 -->
+    <rect x="754" y="530" width="48" height="20"/>
+    <!-- Bow tip -->
+    <polygon points="850,580 875,588 850,596"/>
+  </g>
+
+  <!-- "DN-IV" callsign tag — small, framed, beneath the ship -->
+  <g transform="translate(512, 730)" text-anchor="middle"
+     font-family="DejaVu Sans Mono, Courier, monospace"
+     font-size="42" font-weight="bold" letter-spacing="0.18em">
+    <rect x="-110" y="-38" width="220" height="58" fill="none" stroke="#ffaa33" stroke-width="3"/>
+    <text y="2" fill="#ffaa33">DN-IV</text>
+  </g>
+</svg>
