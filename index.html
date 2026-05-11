@@ -8411,7 +8411,11 @@ class Game {
   static SAVE_KEY = 'dreadspace_save_v1';
 
   _saveState() {
-    if (this.warpState !== 'idle' || this._planetDying) return;
+    // Allow saving during idle (combat) AND prep phase (so scrap/buy actions made
+    // during prep persist on refresh). Block only during active warp visuals and
+    // planet-dying animations where state is in flux.
+    const allowed = this.warpState === 'idle' || this.warpState === 'prep';
+    if (!allowed || this._planetDying) return;
     try {
       const save = {
         resources: this.state.resources,
@@ -8445,8 +8449,16 @@ class Game {
     } catch (e) { return null; }
   }
 
+  // Clear ALL persisted state for a true campaign restart. This means:
+  //   - The main save (fleet, scrap, sector, upgrades, unlocks)
+  //   - The story-seen state (Vess transmissions, ambush flags) — separately stored
+  //     because story state intentionally survives normal save/load
+  //
+  // Anyone wanting a "new campaign" starting from scratch should call THIS. Callers
+  // that only want a partial wipe should do their own localStorage.removeItem instead.
   _clearSave() {
     try { localStorage.removeItem(Game.SAVE_KEY); } catch {}
+    try { localStorage.removeItem('dreadspace_story_seen'); } catch {}
   }
 
   // Apply a save object to the live game state. Called after init scene + planet exist.
@@ -11052,11 +11064,9 @@ class Game {
     document.getElementById('resume-btn').addEventListener('click', () => this._togglePause());
     document.getElementById('restart-btn').addEventListener('click', () => {
       if (confirm('RESTART CAMPAIGN? Saved progress will be erased.')) {
+        // _clearSave wipes both the main save AND story-seen state so the next
+        // playthrough sees the full sequence again.
         this._clearSave();
-        // Also clear story-seen state — a campaign restart should let players see all
-        // story beats again. Otherwise restart-then-replay feels broken (Vess never
-        // calls, ambush never fires) because those flags survived the wipe.
-        try { localStorage.removeItem('dreadspace_story_seen'); } catch {}
         location.reload();
       }
     });
@@ -11501,7 +11511,15 @@ class Game {
   }
 
   _openBuildMenu() {
-    if (this.warpState !== 'idle' || this._planetDying) {
+    // Allow build menu access during:
+    //   - normal idle combat (the standard case)
+    //   - 'prep' phase (the 15s prep window after a planet kill — explicit goal)
+    // Block during:
+    //   - active warp transitions (aftermath, charging, jump, tunnel, arriving)
+    //   - planet dying animation
+    //   - ambush combat
+    const allowed = this.warpState === 'idle' || this.warpState === 'prep';
+    if (!allowed || this._planetDying) {
       this._toast('FLEET IN TRANSIT // WAIT FOR ARRIVAL', 'warn');
       return;
     }
@@ -12049,11 +12067,14 @@ class Game {
   _scrapShip(shipIdx) {
     const ship = this.ships[shipIdx];
     if (!ship) return;
-    // Find the base config for this tier
-    const cfg = Game.SHIP_TIERS.find(s => s.id === ship.tier);
-    if (!cfg) return;
-    const refund = Math.floor((cfg.cost || 0) * 0.5);
-    if (!confirm(`Scrap ${cfg.code} ${ship.callsign || ''}?\n\nRefund: ${refund} scrap (50%)\nUpgrades will be lost.`)) {
+    // SHIP_TIERS is a top-level object keyed by tier id (not a Game.* array). Look up
+    // the base config directly. Fallback to ship.cfg if the lookup misses for any
+    // reason — that way scrap never fails silently because of a config miss.
+    const cfg = (typeof SHIP_TIERS !== 'undefined' && SHIP_TIERS[ship.tier]) || ship.cfg || {};
+    const baseCost = cfg.cost || 0;
+    const refund = Math.floor(baseCost * 0.5);
+    const code = cfg.code || ship.tier;
+    if (!confirm(`Scrap ${code} ${ship.callsign || ''}?\n\nRefund: ${refund} scrap (50%)\nUpgrades will be lost.`)) {
       return;
     }
     // Remove from scene
@@ -12072,7 +12093,7 @@ class Game {
     // Refund scrap
     this.state.resources += refund;
     this._toast(`SCRAPPED // +${this._formatNumber(refund)} SCRAP`, 'warn', 2500);
-    this._radioLog(`[FLEET]: ${cfg.code} ${ship.callsign || ''} decommissioned.`, 'warn');
+    this._radioLog(`[FLEET]: ${code} ${ship.callsign || ''} decommissioned.`, 'warn');
     // Save state so the scrap survives a refresh
     if (this._saveState) this._saveState();
     // Re-render panel
@@ -12156,9 +12177,9 @@ class Game {
       // In scrap mode, compute refund preview
       let scrapBadge = '';
       if (scrapMode) {
-        const cfg = Game.SHIP_TIERS.find(c => c.id === s.tier);
-        const refund = cfg ? Math.floor((cfg.cost || 0) * 0.5) : 0;
-        scrapBadge = `<div class="fl-scrap-badge">−${this._formatNumber(refund < 1000 ? refund : refund)}<br><span>refund</span></div>`;
+        const tierCfg = (typeof SHIP_TIERS !== 'undefined' && SHIP_TIERS[s.tier]) || s.cfg || {};
+        const refund = Math.floor((tierCfg.cost || 0) * 0.5);
+        scrapBadge = `<div class="fl-scrap-badge">−${this._formatNumber(refund)}<br><span>refund</span></div>`;
       }
       rows.push(`<div class="${cls}" data-ship-idx="${idx}">
         <div class="fl-head"><span class="fl-code">${code}</span><span class="fl-name">${name}</span></div>
