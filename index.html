@@ -185,6 +185,87 @@
   #pause-btn:active, #mute-btn:active { background: rgba(255,170,51,0.15); }
   #mute-btn.muted { color: #884444; }
 
+  /* ============ AUDIO POPOUT ============
+     Vertical stadium pill that appears below the speaker button. Two stacked rows
+     (MUSIC + EFFECTS) each with icon, label, and ON/OFF state. The pill has fully
+     rounded ends and flat sides — "vertical straight-sided oval" per the design ref.
+     Initially hidden via opacity/transform; .show class fades it in with a slight
+     scale-up so it feels like it's emerging from the button. */
+  #audio-popout {
+    position: absolute;
+    /* Anchor under the speaker button. Top-bar has padding 10px + button height 38px,
+       plus 8px gap. Width is set so it doesn't push off-screen on small phones. */
+    top: calc(env(safe-area-inset-top, 0px) + 58px);
+    right: 12px;
+    width: 138px;
+    z-index: 35;
+    background: linear-gradient(180deg, rgba(20, 14, 6, 0.97), rgba(10, 6, 2, 0.97));
+    border: 1px solid var(--amber);
+    border-radius: 999px;             /* fully rounded ends */
+    box-shadow:
+      0 6px 22px rgba(0, 0, 0, 0.55),
+      0 0 18px rgba(255, 170, 51, 0.25),
+      inset 0 0 14px rgba(255, 170, 51, 0.06);
+    padding: 6px;
+    display: flex; flex-direction: column;
+    gap: 0;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-6px) scale(0.92);
+    transform-origin: top right;
+    transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+  }
+  #audio-popout.show {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+  }
+  .ap-row {
+    background: transparent;
+    border: 0;
+    color: var(--amber-bright);
+    cursor: pointer;
+    display: flex; align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-align: left;
+    width: 100%;
+    border-radius: 999px;
+    transition: background 0.12s;
+  }
+  .ap-row:active { background: rgba(255, 170, 51, 0.12); }
+  .ap-icon {
+    font-size: 14px;
+    width: 18px; text-align: center;
+    /* When the bus is OFF, dim the icon */
+  }
+  .ap-label {
+    flex: 1;
+    /* Tracking + slight stretch to feel like a panel label */
+  }
+  .ap-state {
+    font-family: 'Black Ops One', sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    min-width: 30px;
+    text-align: right;
+  }
+  .ap-state[data-on="true"]  { color: var(--amber-bright); }
+  .ap-state[data-on="false"] { color: rgba(255, 170, 51, 0.35); }
+  /* When the bus is OFF, dim the whole row except keep the OFF label muted-orange */
+  .ap-row[data-active="false"] .ap-icon,
+  .ap-row[data-active="false"] .ap-label {
+    color: rgba(255, 170, 51, 0.45);
+  }
+  .ap-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--amber-dim), transparent);
+    margin: 0 14px;
+  }
+
   /* ===== Build button ===== */
   #build-btn {
     position: absolute;
@@ -2538,7 +2619,24 @@
       <div class="stat-pill panel corner" id="fleet-pill" style="cursor: pointer; user-select: none;">
         <span class="label">FLEET</span><span class="val" id="fleet-val">0</span>
       </div>
-      <button id="mute-btn" class="corner" aria-label="Mute">🔊</button>
+      <button id="mute-btn" class="corner" aria-label="Audio settings">🔊</button>
+      <!-- ============ AUDIO POPOUT ============
+           Vertical stadium-shaped panel that pops out below the speaker button. Two
+           independent switches: MUSIC and EFFECTS. Each can be toggled individually.
+           Tapping outside closes it; tapping the speaker icon toggles it. -->
+      <div id="audio-popout" aria-hidden="true">
+        <button class="ap-row" data-bus="music" id="ap-music">
+          <span class="ap-icon">🎵</span>
+          <span class="ap-label">MUSIC</span>
+          <span class="ap-state" data-on="true">ON</span>
+        </button>
+        <div class="ap-divider"></div>
+        <button class="ap-row" data-bus="sfx" id="ap-sfx">
+          <span class="ap-icon">🔊</span>
+          <span class="ap-label">EFFECTS</span>
+          <span class="ap-state" data-on="true">ON</span>
+        </button>
+      </div>
       <button id="pause-btn" class="corner" aria-label="Pause">II</button>
     </div>
   </div>
@@ -2866,11 +2964,39 @@ class AudioEngine {
   constructor() {
     this.ctx = null;
     this.master = null;
-    this.muted = false;
+    this.muted = false;       // legacy global mute (kept for compat with pause handler)
     this.lastBoom = 0;
     // Sample storage. We pre-fetch the bytes early; decode happens after AudioContext exists.
     this._samples = {};                 // { name: AudioBuffer }
     this._sampleArrayBuffers = {};      // { name: ArrayBuffer } — pending decode
+
+    // ============ SPLIT-CHANNEL AUDIO ============
+    // We split audio into two independent buses so the user can toggle music and SFX
+    // separately. Both feed `master`. SFX bus also has the existing `combatGain`
+    // sub-bus for distance-attenuation.
+    //
+    //   master
+    //     ├── sfxGain  ── combatGain ── (combat sounds)
+    //     │              └── (everything else)
+    //     └── musicGain ── currentMusicSource
+    //
+    // The `musicOn` / `sfxOn` toggles control musicGain.gain and sfxGain.gain
+    // respectively. Master stays at the volume slider's value so the legacy mute
+    // path (pause-mutes-all) still works without surprising interactions.
+    this.musicGain = null;
+    this.sfxGain = null;
+    this.musicOn = true;          // user preference; toggled by UI
+    this.sfxOn = true;            // user preference; toggled by UI
+
+    // Currently-playing music state. Music is implemented via AudioBufferSourceNode
+    // with .loop = true. AudioBufferSourceNode is one-shot — to "stop" we call .stop()
+    // and create a new one. To prevent stacking (rapid playMusic calls), we always
+    // stop the previous source before starting a new one, with a short fade so
+    // transitions don't pop.
+    this._musicSource = null;     // current AudioBufferSourceNode (or null)
+    this._musicSourceGain = null; // per-source gain (for fade-in/out)
+    this._musicName = null;       // name of currently-playing track
+    this._musicCrossfadeTimer = null;  // tracks any pending fade-out cleanup
   }
 
   // Fetch sample bytes early. Safe to call before init() — bytes are buffered, not decoded yet.
@@ -2906,6 +3032,11 @@ class AudioEngine {
     try {
       // .slice(0) clones — decodeAudioData detaches its input on some browsers
       this._samples[name] = await this.ctx.decodeAudioData(ab.slice(0));
+      // If music was requested before this track decoded, fire it now
+      if (this._pendingMusicName === name) {
+        this._pendingMusicName = null;
+        this.playMusic(name);
+      }
     } catch (e) {
       console.warn(`Audio decode failed: ${name}`, e);
     }
@@ -2934,10 +3065,24 @@ class AudioEngine {
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.55;
     this.master.connect(this.ctx.destination);
+    // ============ SUB-BUSES ============
+    // sfxGain — for all gameplay sounds (cannons, explosions, UI stings, ambient drone)
+    // musicGain — for looped music tracks
+    // Each is independently toggleable. Combat sub-bus still hangs off sfxGain so
+    // distance attenuation works as before.
+    this.sfxGain = this.ctx.createGain();
+    this.sfxGain.gain.value = this.sfxOn ? 1.0 : 0.0;
+    this.sfxGain.connect(this.master);
+    this.musicGain = this.ctx.createGain();
+    // Music is mixed quieter than SFX so it sits in the background (the user wanted
+    // jazz "not too loud, but audible"). The 0.35 base value here combines with the
+    // master volume and individual track gain to produce a comfortable mix level.
+    this.musicGain.gain.value = this.musicOn ? 0.35 : 0.0;
+    this.musicGain.connect(this.master);
     // Combat sub-bus — distance-attenuated by the camera's distance from the planet.
     this.combatGain = this.ctx.createGain();
     this.combatGain.gain.value = 1.0;
-    this.combatGain.connect(this.master);
+    this.combatGain.connect(this.sfxGain);     // was master, now under sfxGain
 
     // CRITICAL: explicitly resume() synchronously inside this user-gesture call.
     // Safari/iOS often start contexts in 'suspended' state even after creation in a click
@@ -2992,7 +3137,9 @@ class AudioEngine {
     src.playbackRate.value = rate;
     const g = this.ctx.createGain();
     g.gain.value = gain;
-    src.connect(g); g.connect(this.master);
+    // Route through sfxGain so the SFX toggle controls this. The legacy `master`
+    // gain still applies (volume slider). Music goes through a different path.
+    src.connect(g); g.connect(this.sfxGain || this.master);
     if (duration != null) src.start(t, offset, duration);
     else                  src.start(t, offset);
     return { src, gain: g, ctx: this.ctx };
@@ -3008,7 +3155,7 @@ class AudioEngine {
     filter.type = 'lowpass';
     filter.frequency.value = 110;
     gain.gain.value = 0.05;
-    osc.connect(filter); filter.connect(gain); gain.connect(this.master);
+    osc.connect(filter); filter.connect(gain); gain.connect(this.sfxGain || this.master);
     osc.start();
     // Slow LFO on filter
     const lfo = ctx.createOscillator();
@@ -3307,7 +3454,7 @@ class AudioEngine {
     osc.type = 'triangle'; osc.frequency.value = freq;
     g.gain.setValueAtTime(0.18, t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
-    osc.connect(g); g.connect(this.master);
+    osc.connect(g); g.connect(this.sfxGain || this.master);
     osc.start(t); osc.stop(t + 0.15);
   }
 
@@ -3325,9 +3472,139 @@ class AudioEngine {
       g.gain.exponentialRampToValueAtTime(0.0001, startT + 0.5);
       const filter = this.ctx.createBiquadFilter();
       filter.type = 'lowpass'; filter.frequency.value = 1500;
-      osc.connect(filter); filter.connect(g); g.connect(this.master);
+      osc.connect(filter); filter.connect(g); g.connect(this.sfxGain || this.master);
       osc.start(startT); osc.stop(startT + 0.55);
     });
+  }
+
+  // ============ MUSIC PLAYBACK ============
+  // playMusic(name, opts) — start a music track. If a track is already playing, the
+  // existing source is faded out (300ms) then stopped while the new one is faded in
+  // (300ms). Music samples are looped via AudioBufferSourceNode.loop = true so the
+  // engine handles loop boundaries seamlessly. Per-source gain is tracked separately
+  // so we can crossfade without touching musicGain (which is the user-controlled
+  // master for music).
+  //
+  // Critical: this is idempotent for the same track name. Calling playMusic('jazz')
+  // while jazz is already playing is a no-op (no restart, no double-play). This
+  // means callers can call it freely from state transitions without worrying about
+  // re-triggering.
+  playMusic(name, opts = {}) {
+    if (!this.ctx) return;
+    // Idempotent: already playing this track, leave it alone
+    if (this._musicName === name && this._musicSource) return;
+    // Not yet decoded (or failed to load) — bail silently, no error
+    if (!this._samples[name]) {
+      // Update the intent so when the buffer arrives, decode logic can kick this on
+      this._musicName = name;
+      this._pendingMusicName = name;
+      return;
+    }
+    const fadeInMs = opts.fadeInMs != null ? opts.fadeInMs : 350;
+    const trackGain = opts.gain != null ? opts.gain : 1.0;
+    const loop = opts.loop !== false;       // default true
+
+    // Stop current track with quick fade
+    this._stopCurrentMusic(250);
+
+    // Create new source + per-source gain. The per-source gain handles fade in/out
+    // without touching musicGain (which is the master music level controlled by user).
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = this._samples[name];
+    src.loop = loop;
+    const srcGain = ctx.createGain();
+    srcGain.gain.value = 0.0001;
+    src.connect(srcGain);
+    srcGain.connect(this.musicGain);
+
+    // Fade in from 0.0001 to trackGain
+    const t = ctx.currentTime;
+    srcGain.gain.setValueAtTime(0.0001, t);
+    srcGain.gain.exponentialRampToValueAtTime(Math.max(0.001, trackGain), t + fadeInMs / 1000);
+
+    try {
+      src.start(t);
+    } catch (e) {
+      console.warn(`Music start failed for ${name}:`, e);
+      return;
+    }
+
+    this._musicSource = src;
+    this._musicSourceGain = srcGain;
+    this._musicName = name;
+    this._pendingMusicName = null;
+
+    // If non-looped (e.g. victory), self-clear when it ends
+    if (!loop) {
+      src.onended = () => {
+        if (this._musicSource === src) {
+          try { srcGain.disconnect(); } catch {}
+          this._musicSource = null;
+          this._musicSourceGain = null;
+          this._musicName = null;
+          // Notify subscribers — engine code may want to resume background music
+          if (this._onMusicEnded) this._onMusicEnded(name);
+        }
+      };
+    }
+  }
+
+  // Stop the currently-playing music with a short fade. Used both directly (when
+  // transitioning to silence) and internally before starting a new track.
+  stopMusic(fadeMs = 300) {
+    this._stopCurrentMusic(fadeMs);
+    this._musicName = null;
+    this._pendingMusicName = null;
+  }
+
+  _stopCurrentMusic(fadeMs) {
+    if (!this._musicSource || !this._musicSourceGain) return;
+    const src = this._musicSource;
+    const srcGain = this._musicSourceGain;
+    const t = this.ctx.currentTime;
+    try {
+      srcGain.gain.cancelScheduledValues(t);
+      srcGain.gain.setValueAtTime(Math.max(0.0001, srcGain.gain.value), t);
+      srcGain.gain.exponentialRampToValueAtTime(0.0001, t + fadeMs / 1000);
+    } catch (e) {
+      // Fall through — we'll still call stop() on the source
+    }
+    // Clear in-flight crossfade timer
+    if (this._musicCrossfadeTimer) {
+      clearTimeout(this._musicCrossfadeTimer);
+      this._musicCrossfadeTimer = null;
+    }
+    // After the fade, actually stop and disconnect the source
+    this._musicCrossfadeTimer = setTimeout(() => {
+      try { src.stop(); } catch {}
+      try { src.disconnect(); } catch {}
+      try { srcGain.disconnect(); } catch {}
+      this._musicCrossfadeTimer = null;
+    }, fadeMs + 30);
+    // Immediately clear our references so a new playMusic() doesn't see stale state
+    this._musicSource = null;
+    this._musicSourceGain = null;
+  }
+
+  // Toggle handlers — flip the corresponding sub-bus gain. Smooth ramp (50ms) so
+  // toggling doesn't pop. The user-preference values (musicOn/sfxOn) are mirrored
+  // so persistence and UI reads work.
+  setMusicOn(on) {
+    this.musicOn = !!on;
+    if (this.musicGain) {
+      const t = this.ctx.currentTime;
+      this.musicGain.gain.cancelScheduledValues(t);
+      this.musicGain.gain.linearRampToValueAtTime(on ? 0.35 : 0.0, t + 0.05);
+    }
+  }
+  setSfxOn(on) {
+    this.sfxOn = !!on;
+    if (this.sfxGain) {
+      const t = this.ctx.currentTime;
+      this.sfxGain.gain.cancelScheduledValues(t);
+      this.sfxGain.gain.linearRampToValueAtTime(on ? 1.0 : 0.0, t + 0.05);
+    }
   }
 }
 
@@ -3632,6 +3909,12 @@ class Game {
       cannon:    'cannon.mp3',
       explosion: 'explosion.mp3',
       warp:      'warp.mp3',
+      // Music tracks. These are looped for bagpipes/jazz and one-shot for victory.
+      // The names are lowercase here but the files in the repo use the upper-case
+      // names from the upload UI. We use the exact filenames so production works.
+      intro_bagpipes:  'INTRO_BAGPIPES.mp3',
+      jazz_background: 'JAZZ_BACKGROUND.mp3',
+      victory_sound:   'VICTORY_SOUND.mp3',
     });
   }
 
@@ -4769,7 +5052,8 @@ class Game {
               masterGain.gain.exponentialRampToValueAtTime(0.45, tStart + 0.4);
               masterGain.gain.exponentialRampToValueAtTime(0.6, tStart + 0.95);
               masterGain.gain.exponentialRampToValueAtTime(0.001, tStart + dur);
-              masterGain.connect(ctx.destination);
+              // Route via sfxGain so the SFX toggle controls it (was ctx.destination)
+              masterGain.connect(this.audio.sfxGain || ctx.destination);
 
               // Low rumble sweep
               const low = ctx.createOscillator();
@@ -4860,6 +5144,12 @@ class Game {
             setTimeout(() => { try { this.audio.explosion(true); } catch {} }, 80);
             setTimeout(() => { try { this.audio.explosion(false); } catch {} }, 250);
             setTimeout(() => { try { this.audio.shipHit(); } catch {} }, 380);
+            // ============ INTRO BAGPIPES ============
+            // Start the bagpipes loop right when the laser connects. They carry the
+            // emotional weight of the wreck and continue playing through the briefing
+            // until the player attacks their first planet. We give it a short fade-in
+            // so it doesn't compete with the impact transient.
+            try { this.audio.playMusic('intro_bagpipes', { gain: 1.0, fadeInMs: 800 }); } catch {}
             // Sub-bass thud at the very end for body
             try {
               const ctx = this.audio.ctx;
@@ -4869,7 +5159,7 @@ class Game {
               osc.frequency.exponentialRampToValueAtTime(20, ctx.currentTime + 0.8);
               gain.gain.setValueAtTime(0.6, ctx.currentTime);
               gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.0);
-              osc.connect(gain).connect(ctx.destination);
+              osc.connect(gain).connect(this.audio.sfxGain || ctx.destination);
               osc.start();
               osc.stop(ctx.currentTime + 1.0);
             } catch {}
@@ -5088,7 +5378,7 @@ class Game {
             const g = ctx.createGain();
             g.gain.setValueAtTime(0.3, t0);
             g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.6);
-            g.connect(ctx.destination);
+            g.connect(this.audio.sfxGain || ctx.destination);
             const o1 = ctx.createOscillator(); o1.type='triangle'; o1.frequency.value = 220;
             const o2 = ctx.createOscillator(); o2.type='triangle'; o2.frequency.value = 330;
             o1.connect(g); o2.connect(g);
@@ -6401,6 +6691,14 @@ class Game {
     this.ambushFrigatesKilled = 0;
     this.ambushHasResolved = false;
 
+    // ============ MUSIC: SILENCE FOR THE FIGHT ============
+    // Ambushes/boss fights are high-stress. Cut the background jazz so the player's
+    // ear is clear for cannon fire, ship hits, and Vess's transmissions. Music
+    // resumes on _endAmbush.
+    if (this.audio && this.audio.stopMusic) {
+      try { this.audio.stopMusic(400); } catch {}
+    }
+
     // ============ DRAMATIC DROP-OUT SEQUENCE ============
     //
     // Goal: sell "you are being torn out of hyperspace involuntarily" — not just a
@@ -6890,6 +7188,20 @@ class Game {
     const cfg = this.ambushConfig;
 
     if (outcome === 'wounded' || outcome === 'timeout') {
+      // ============ MUSIC: VICTORY → JAZZ ============
+      // Player won the ambush. Play the one-shot victory sting; when it ends, the
+      // _onMusicEnded hook resumes the jazz background. Setting the hook BEFORE
+      // playMusic ensures the callback is registered when the source's `ended`
+      // event eventually fires.
+      if (this.audio && this.audio.playMusic) {
+        this.audio._onMusicEnded = (name) => {
+          if (name === 'victory_sound' &&
+              (!this.ambushState || this.ambushState === 'idle' || this.ambushState === 'ending')) {
+            try { this.audio.playMusic('jazz_background', { gain: 0.55, fadeInMs: 1200 }); } catch {}
+          }
+        };
+        try { this.audio.playMusic('victory_sound', { loop: false, gain: 1.0, fadeInMs: 80 }); } catch {}
+      }
       // All surviving enemies enter escape mode
       for (const e of this.enemyShips) {
         if (!e.isEscaping) {
@@ -7154,6 +7466,10 @@ class Game {
     // Final UI cleanup + toast
     this._toast('REASSIGNED TO SECTOR 1 // FLEET REISSUED', 'warn', 5000);
     this._radioLog('[MINISTRY]: returning to the front. the Ministry has invested heavily in you.', 'good');
+    // Resume jazz background — fight's over, time to rebuild.
+    if (this.audio && this.audio.playMusic) {
+      try { this.audio.playMusic('jazz_background', { gain: 0.55, fadeInMs: 1500 }); } catch {}
+    }
   }
 
   // ============================================================
@@ -7189,6 +7505,12 @@ class Game {
   _beginFleetWipe() {
     if (this._fleetWipeActive) return;
     this._fleetWipeActive = true;
+
+    // Cut music for the cutscene — the cinematic loss beat is bleak; let the descending
+    // audio stings and Ministry transmission carry the moment. Jazz resumes on reset.
+    if (this.audio && this.audio.stopMusic) {
+      try { this.audio.stopMusic(450); } catch {}
+    }
 
     // Track run count for stats/lore (e.g. "your 3rd attempt")
     this.warRecord = this.warRecord || {};
@@ -7335,6 +7657,10 @@ class Game {
     this._toast(`REPOSITIONED — SECTOR ${String(newSector).padStart(2,'0')}`, 'warn', 5000);
     this._radioLog(`[MINISTRY]: replacement hull en route, Commander. don't waste it.`, 'good');
     this._updateHUD();
+    // Restart jazz now that combat is resuming
+    if (this.audio && this.audio.playMusic) {
+      try { this.audio.playMusic('jazz_background', { gain: 0.55, fadeInMs: 1500 }); } catch {}
+    }
   }
 
   _endAmbush() {
@@ -9367,6 +9693,18 @@ class Game {
     // into _destroyPlanet, multi-counting credits + level-ups + turret spawns.
     if (this._planetDying || this.state.planetHP <= 0) return;
 
+    // ============ FIRST-ATTACK MUSIC TRANSITION ============
+    // The intro bagpipes carry the cold-open mood through the briefing and into combat.
+    // The MOMENT the player actually starts fighting (lands their first hit on a planet),
+    // we crossfade to the jazz background track. Idempotent — playMusic is a no-op when
+    // the same track is already playing, so calling this every damage tick is fine.
+    if (this.audio && this.audio.playMusic) {
+      // Only swap if we're not currently in ambush (ambush silences music entirely)
+      if (!this.ambushState || this.ambushState === 'idle') {
+        this.audio.playMusic('jazz_background', { gain: 0.55, fadeInMs: 1200 });
+      }
+    }
+
     // DEFENSES BROKEN: once turret count drops below 25%, all damage to planet doubles.
     // Eliminates the late-game slog of chipping HP off an inert planet.
     if (this._defensesBroken) {
@@ -10117,6 +10455,22 @@ class Game {
     this._planetDying = true;
 
     this.audio.victoryFanfare();
+    // ============ VICTORY MUSIC ============
+    // Play the one-shot victory mp3 over the synthesized fanfare. When the victory
+    // sound finishes, _onMusicEnded resumes the jazz background so the player has
+    // music during prep phase. Hook is set BEFORE the play call so the source's
+    // ended event registers it properly.
+    if (this.audio && this.audio.playMusic) {
+      this.audio._onMusicEnded = (name) => {
+        if (name === 'victory_sound') {
+          // Only resume jazz if we're not in another suppressing state (ambush, fleet wipe)
+          if ((!this.ambushState || this.ambushState === 'idle') && !this._fleetWipeActive) {
+            try { this.audio.playMusic('jazz_background', { gain: 0.55, fadeInMs: 1200 }); } catch {}
+          }
+        }
+      };
+      try { this.audio.playMusic('victory_sound', { loop: false, gain: 1.0, fadeInMs: 60 }); } catch {}
+    }
     const center = this.planetGroup.position.clone();
     const chainCount = 6;
     const chainGap = 140;
@@ -12855,6 +13209,14 @@ class Game {
       this.running = true;
       if (loadedSave) {
         this._applySave(loadedSave);
+        // Continue: skip the cold open / briefing. Player is mid-campaign — jazz is the
+        // appropriate music. Slight delay so the audio context has time to fully resume
+        // (Safari/iOS sometimes need a beat after the user gesture).
+        setTimeout(() => {
+          if (this.audio && this.audio.playMusic) {
+            try { this.audio.playMusic('jazz_background', { gain: 0.55, fadeInMs: 1500 }); } catch {}
+          }
+        }, 250);
         this.clock.start();
         this._loop();
       } else {
@@ -13088,50 +13450,118 @@ class Game {
     const volVal = document.getElementById('volume-val');
 
     let savedVol = 55, savedMuted = false;
+    let savedMusicOn = true, savedSfxOn = true;
     try {
       const raw = localStorage.getItem('dreadnought_audio_prefs');
       if (raw) {
         const p = JSON.parse(raw);
         if (typeof p.volume === 'number') savedVol = clamp(p.volume, 0, 100);
         if (typeof p.muted === 'boolean')  savedMuted = p.muted;
+        if (typeof p.musicOn === 'boolean') savedMusicOn = p.musicOn;
+        if (typeof p.sfxOn === 'boolean')   savedSfxOn   = p.sfxOn;
       }
     } catch {}
     volSlider.value = savedVol;
     volVal.textContent = savedVol;
     if (savedMuted) muteBtn.classList.add('muted');
-    muteBtn.textContent = savedMuted ? '🔇' : '🔊';
+    // Icon reflects "are ANY buses on". If both off → muted icon. Otherwise normal.
+    const _anyAudioOn = () => (this.audio && (this.audio.musicOn || this.audio.sfxOn));
+    const _refreshIcon = () => {
+      const off = !_anyAudioOn();
+      muteBtn.textContent = off ? '🔇' : '🔊';
+      muteBtn.classList.toggle('muted', off);
+    };
+
+    // Pre-set audio engine prefs so they apply the moment init() runs
+    if (this.audio) {
+      this.audio.musicOn = savedMusicOn;
+      this.audio.sfxOn   = savedSfxOn;
+    }
 
     const applyAudioPrefs = () => {
       const v = parseInt(volSlider.value, 10) / 100;
       const muted = muteBtn.classList.contains('muted');
       if (this.audio) {
-        this.audio.muted = muted;
+        // Master volume from slider. Legacy `muted` is now the "all off" composite —
+        // we don't toggle it here, but if it was saved we honor it.
         if (this.audio.master) this.audio.master.gain.value = muted ? 0 : v;
+        // Apply per-bus prefs through the engine
+        if (this.audio.setMusicOn) this.audio.setMusicOn(this.audio.musicOn);
+        if (this.audio.setSfxOn)   this.audio.setSfxOn(this.audio.sfxOn);
       }
       try {
         localStorage.setItem('dreadnought_audio_prefs', JSON.stringify({
-          volume: parseInt(volSlider.value, 10), muted: muted,
+          volume: parseInt(volSlider.value, 10),
+          muted: muted,
+          musicOn: this.audio ? this.audio.musicOn : savedMusicOn,
+          sfxOn:   this.audio ? this.audio.sfxOn   : savedSfxOn,
         }));
       } catch {}
     };
 
-    muteBtn.addEventListener('click', () => {
-      const nowMuted = !muteBtn.classList.contains('muted');
-      muteBtn.classList.toggle('muted', nowMuted);
-      muteBtn.textContent = nowMuted ? '🔇' : '🔊';
+    // ============ AUDIO POPOUT WIRING ============
+    // Speaker button now toggles a vertical popout with two independent switches
+    // (MUSIC + EFFECTS). Each switch is a row inside the popout — tapping it flips
+    // the corresponding bus and updates the row's ON/OFF label and dim state.
+    const popout = document.getElementById('audio-popout');
+    const apMusicRow = document.getElementById('ap-music');
+    const apSfxRow   = document.getElementById('ap-sfx');
+    const refreshPopoutVisuals = () => {
+      const mOn = this.audio ? this.audio.musicOn : savedMusicOn;
+      const sOn = this.audio ? this.audio.sfxOn   : savedSfxOn;
+      apMusicRow.setAttribute('data-active', mOn ? 'true' : 'false');
+      apSfxRow.setAttribute('data-active',   sOn ? 'true' : 'false');
+      const mState = apMusicRow.querySelector('.ap-state');
+      const sState = apSfxRow.querySelector('.ap-state');
+      mState.textContent = mOn ? 'ON' : 'OFF';
+      sState.textContent = sOn ? 'ON' : 'OFF';
+      mState.setAttribute('data-on', mOn ? 'true' : 'false');
+      sState.setAttribute('data-on', sOn ? 'true' : 'false');
+      _refreshIcon();
+    };
+    refreshPopoutVisuals();
+
+    muteBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      popout.classList.toggle('show');
+      popout.setAttribute('aria-hidden', popout.classList.contains('show') ? 'false' : 'true');
+    });
+    // Click outside closes the popout
+    document.addEventListener('click', (e) => {
+      if (!popout.classList.contains('show')) return;
+      if (popout.contains(e.target) || e.target === muteBtn) return;
+      popout.classList.remove('show');
+      popout.setAttribute('aria-hidden', 'true');
+    });
+    apMusicRow.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!this.audio) return;
+      this.audio.musicOn = !this.audio.musicOn;
+      refreshPopoutVisuals();
       applyAudioPrefs();
     });
+    apSfxRow.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!this.audio) return;
+      this.audio.sfxOn = !this.audio.sfxOn;
+      refreshPopoutVisuals();
+      applyAudioPrefs();
+    });
+
     volSlider.addEventListener('input', () => {
       volVal.textContent = volSlider.value;
       // If user moves slider above 0, unmute automatically
       if (parseInt(volSlider.value, 10) > 0 && muteBtn.classList.contains('muted')) {
         muteBtn.classList.remove('muted');
-        muteBtn.textContent = '🔊';
+        _refreshIcon();
       }
       applyAudioPrefs();
     });
     // Apply once on init (audio ctx may not exist yet — value will be re-read on init)
-    this._applyAudioPrefsOnInit = applyAudioPrefs;
+    this._applyAudioPrefsOnInit = () => {
+      applyAudioPrefs();
+      refreshPopoutVisuals();
+    };
 
     // Boot terminal lines
     const lines = [
