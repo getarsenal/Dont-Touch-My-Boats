@@ -1,0 +1,32 @@
+{
+  "name": "Dreadnought — Orbital Siege Command",
+  "short_name": "Dreadnought",
+  "description": "Command a fleet of WW2-style space battleships and reduce defended planets to artistically-arranged debris. Big Bad Boat Empire — Galactic Operations.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#080604",
+  "theme_color": "#ffaa33",
+  "categories": ["games"],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-1024.png",
+      "type": "image/png",
+      "sizes": "1024x1024",
+      "purpose": "any"
+    }
+  ]
+}
