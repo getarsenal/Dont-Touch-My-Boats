@@ -3,27 +3,20 @@
 #
 # Capacitor 7+/8 project using Swift Package Manager (SPM) — no CocoaPods.
 # Code-signing approach mirrors the proven ARSENAL pattern: ios_signing
-# block auto-loads the team-level distribution cert and auto-creates the
-# provisioning profile via the App Store Connect integration.
+# block auto-loads the team-level distribution cert + manually-uploaded
+# provisioning profile.
+#
+# Trigger: every push to main.
 # =====================================================================
 workflows:
   ios-workflow:
     name: DTMB iOS Build
     integrations:
-      # Same App Store Connect API key reference as ARSENAL — works across
-      # all apps in the Scheidel Holdings LLC developer team.
       app_store_connect: Scheidel Holdings LLC
 
     environment:
       xcode: latest
       node: latest
-      # ios_signing tells Codemagic to:
-      #   1. Fetch the team-level iOS distribution cert (the .p12 with private
-      #      key bundled — "ARSENAL iOS Distribution" in your team settings)
-      #   2. Auto-create/fetch a provisioning profile matching this bundle ID
-      #      via the App Store Connect API integration
-      # This is the same flow ARSENAL uses successfully. No CERTIFICATE_PRIVATE_KEY
-      # env var needed because the .p12 already contains the private key.
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.scheidelholdings.dontouchmyboats
@@ -37,8 +30,6 @@ workflows:
 
     scripts:
       - name: Install dependencies
-        # Capacitor CLI needs >=22; Codemagic's "node: latest" should give us
-        # that. If a future Codemagic image regresses, swap to the nvm pattern.
         script: |
           npm install
 
@@ -49,15 +40,20 @@ workflows:
 
       - name: Apply code signing profiles
         # Auto-fetched profile from the ios_signing block above is applied
-        # to the Xcode project here. No manual cert/profile management.
+        # to the Xcode project here.
         script: |
           xcode-project use-profiles
 
       - name: Auto-increment build number
-        # TestFlight rejects re-uploads with the same CFBundleVersion. Pull
-        # the latest from App Store Connect, bump by 1, set on the project.
+        # TestFlight rejects re-uploads with the same CFBundleVersion. Asks
+        # App Store Connect for the highest build number on file, increments
+        # by 1, and sets it on the local Xcode project before building.
+        # No manual bumping required — each push auto-versions itself.
+        #
+        # The first time this runs against an app that already has build "1"
+        # uploaded, it'll bump to build "2". After that, it just keeps going up.
         script: |
-          cd ios/App
+          cd $CM_BUILD_DIR/ios/App
           LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "com.scheidelholdings.dontouchmyboats" 2>/dev/null || echo "0")
           NEW_BUILD_NUMBER=$(($LATEST_BUILD_NUMBER + 1))
           echo "Latest in ASC: $LATEST_BUILD_NUMBER -> setting build number to $NEW_BUILD_NUMBER"
