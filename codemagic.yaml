@@ -1,12 +1,5 @@
 # =====================================================================
 # DON'T TOUCH MY BOATS - iOS TestFlight pipeline
-#
-# Capacitor 7+/8 project using Swift Package Manager (SPM) — no CocoaPods.
-# Code-signing approach mirrors the proven ARSENAL pattern: ios_signing
-# block auto-loads the team-level distribution cert + manually-uploaded
-# provisioning profile.
-#
-# Trigger: every push to main.
 # =====================================================================
 workflows:
   ios-workflow:
@@ -34,33 +27,33 @@ workflows:
           npm install
 
       - name: Sync Capacitor
-        # Copies www/ to ios/App/App/public/ and updates SPM Package.swift.
         script: |
           npx cap sync ios
 
       - name: Apply code signing profiles
-        # Auto-fetched profile from the ios_signing block above is applied
-        # to the Xcode project here.
         script: |
           xcode-project use-profiles
 
-      - name: Auto-increment build number
-        # TestFlight rejects re-uploads with the same CFBundleVersion. Asks
-        # App Store Connect for the highest build number on file, increments
-        # by 1, and sets it on the local Xcode project before building.
-        # No manual bumping required — each push auto-versions itself.
+      - name: Set build number from timestamp
+        # Apple requires each upload to have a higher CFBundleVersion than the
+        # previous upload. Using a timestamp guarantees this: every build gets
+        # a number larger than the last, automatically, with no need to query
+        # App Store Connect (which was returning stale "0" results).
         #
-        # The first time this runs against an app that already has build "1"
-        # uploaded, it'll bump to build "2". After that, it just keeps going up.
+        # Format: YYYYMMDDHHMM (12 digits). Each build is naturally chronological.
+        # Apple accepts integer build numbers up to 2^31-1 = 2147483647, so this
+        # format is safe through year 2147.
+        #
+        # Marketing version (the "1.0" the user sees in App Store) is set
+        # separately in the Xcode project — agvtool's `new-version` only
+        # touches CFBundleVersion, not CFBundleShortVersionString.
         script: |
           cd $CM_BUILD_DIR/ios/App
-          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "com.scheidelholdings.dontouchmyboats" 2>/dev/null || echo "0")
-          NEW_BUILD_NUMBER=$(($LATEST_BUILD_NUMBER + 1))
-          echo "Latest in ASC: $LATEST_BUILD_NUMBER -> setting build number to $NEW_BUILD_NUMBER"
-          agvtool new-version -all $NEW_BUILD_NUMBER
+          BUILD_NUMBER=$(date +%Y%m%d%H%M)
+          echo "Setting build number to $BUILD_NUMBER"
+          agvtool new-version -all $BUILD_NUMBER
 
       - name: Build IPA
-        # SPM project builds from .xcodeproj directly (no .xcworkspace).
         script: |
           xcode-project build-ipa \
             --project "ios/App/App.xcodeproj" \
