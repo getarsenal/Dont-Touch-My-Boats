@@ -1,40 +1,32 @@
 # =====================================================================
-# DON'T TOUCH MY BOATS — iOS TestFlight pipeline
+# DON'T TOUCH MY BOATS - iOS TestFlight pipeline
 #
-# Codemagic builds the iOS app via Capacitor, signs it with a freshly
-# created Apple Developer provisioning profile + cert (or reuses existing
-# ones), and uploads the signed .ipa to App Store Connect → TestFlight.
-#
-# Signing mode: AUTOMATIC. Codemagic calls Apple's API to create a
-# provisioning profile + dist cert for the bundle ID if none exists.
-# No manual cert / profile management required.
-#
-# Trigger: every push to main. To skip a build, add "[skip ci]" to the
-# commit message.
+# Capacitor 7+/8 project using Swift Package Manager (SPM) — no CocoaPods.
+# Code-signing approach mirrors the proven ARSENAL pattern: ios_signing
+# block auto-loads the team-level distribution cert and auto-creates the
+# provisioning profile via the App Store Connect integration.
 # =====================================================================
 workflows:
-  ios-testflight:
-    name: DTMB iOS TestFlight
-    instance_type: mac_mini_m2
-    max_build_duration: 60
-
+  ios-workflow:
+    name: DTMB iOS Build
     integrations:
-      # Apple Developer Portal — provides ASC API access for fetching/creating
-      # signing files AND for uploading the .ipa. Name must match EXACTLY
-      # what's in Codemagic Settings -> Integrations -> Developer Portal.
+      # Same App Store Connect API key reference as ARSENAL — works across
+      # all apps in the Scheidel Holdings LLC developer team.
       app_store_connect: Scheidel Holdings LLC
 
     environment:
-      vars:
-        # Path to the Capacitor Xcode workspace and the build scheme.
-        # These paths are Capacitor's convention - same for every Capacitor
-        # iOS project, no customization needed.
-        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
-        XCODE_SCHEME: "App"
-        BUNDLE_ID: "com.scheidelholdings.dontouchmyboats"
       xcode: latest
-      node: 20.14.0
-      cocoapods: default
+      node: latest
+      # ios_signing tells Codemagic to:
+      #   1. Fetch the team-level iOS distribution cert (the .p12 with private
+      #      key bundled — "ARSENAL iOS Distribution" in your team settings)
+      #   2. Auto-create/fetch a provisioning profile matching this bundle ID
+      #      via the App Store Connect API integration
+      # This is the same flow ARSENAL uses successfully. No CERTIFICATE_PRIVATE_KEY
+      # env var needed because the .p12 already contains the private key.
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.scheidelholdings.dontouchmyboats
 
     triggering:
       events:
@@ -42,106 +34,46 @@ workflows:
       branch_patterns:
         - pattern: main
           include: true
-          source: true
-      cancel_previous_builds: true
 
     scripts:
-      - name: Sanity check repo layout
-        # Cheap debug step - if anything fails, the log shows what was
-        # actually in the repo at build time.
+      - name: Install dependencies
+        # Capacitor CLI needs >=22; Codemagic's "node: latest" should give us
+        # that. If a future Codemagic image regresses, swap to the nvm pattern.
         script: |
-          echo "--- repo root ---"
-          ls -la
-          echo "--- www/ ---"
-          ls -la www/ 2>/dev/null || echo "(no www folder yet)"
-          echo "--- ios/ ---"
-          ls -la ios/ 2>/dev/null || echo "(no ios folder yet)"
+          npm install
 
-      - name: Install npm dependencies
-        # Capacitor projects usually have a package.json with @capacitor/core
-        # and @capacitor/cli at minimum. If missing, this is a no-op.
-        script: |
-          if [ -f "package.json" ]; then
-            npm install
-          else
-            echo "No package.json - skipping npm install"
-          fi
-
-      - name: Install CocoaPods dependencies
-        # Capacitor uses CocoaPods for native iOS dependencies (Capacitor
-        # core + each installed plugin). Reads the Podfile inside ios/App/.
-        script: |
-          cd ios/App
-          pod install
-
-      - name: Sync Capacitor web assets to iOS native project
-        # Copies the contents of www/ into ios/App/App/public/ so the iOS
-        # bundle has the latest HTML/JS/assets. Required every build.
+      - name: Sync Capacitor
+        # Copies www/ to ios/App/App/public/ and updates SPM Package.swift.
         script: |
           npx cap sync ios
 
-      - name: Initialize keychain for code signing
-        # Sets up a fresh macOS keychain that the build will use for signing.
-        # Each Codemagic build runs in isolation so this is always needed.
-        script: |
-          keychain initialize
-
-      - name: Fetch or create signing files from Apple
-        # The "--create" flag tells Apple to issue a brand new profile + cert
-        # if none exist for this bundle ID. First build creates them; subsequent
-        # builds reuse the same files. Type IOS_APP_STORE covers both App Store
-        # and TestFlight distribution.
-        script: |
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
-
-      - name: Add signing certificate to keychain
-        # Loads the certificate (just fetched / created) into the keychain so
-        # xcodebuild can find it during the archive step.
-        script: |
-          keychain add-certificates
-
-      - name: Apply signing settings to Xcode project
-        # Tells the Xcode project to use the freshly fetched provisioning
-        # profile. Without this, Xcode would fall back to its default which
-        # doesn't know about Codemagic's keychain.
+      - name: Apply code signing profiles
+        # Auto-fetched profile from the ios_signing block above is applied
+        # to the Xcode project here. No manual cert/profile management.
         script: |
           xcode-project use-profiles
 
       - name: Auto-increment build number
-        # TestFlight rejects re-uploads with the same CFBundleVersion. This
-        # asks App Store Connect for the highest build number on file and
-        # increments by 1. No manual bumping required between releases.
+        # TestFlight rejects re-uploads with the same CFBundleVersion. Pull
+        # the latest from App Store Connect, bump by 1, set on the project.
         script: |
-          cd $CM_BUILD_DIR/ios/App
-          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$BUNDLE_ID" 2>/dev/null || echo "0")
+          cd ios/App
+          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "com.scheidelholdings.dontouchmyboats" 2>/dev/null || echo "0")
           NEW_BUILD_NUMBER=$(($LATEST_BUILD_NUMBER + 1))
           echo "Latest in ASC: $LATEST_BUILD_NUMBER -> setting build number to $NEW_BUILD_NUMBER"
           agvtool new-version -all $NEW_BUILD_NUMBER
 
-      - name: Build .ipa for distribution
-        # Produces the signed .ipa. Codemagic places it in $CM_BUILD_DIR/build/
-        # by convention; the publishing step picks it up from there.
+      - name: Build IPA
+        # SPM project builds from .xcodeproj directly (no .xcworkspace).
         script: |
           xcode-project build-ipa \
-            --workspace "$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME"
+            --project "ios/App/App.xcodeproj" \
+            --scheme "App"
 
     artifacts:
-      # What gets attached to the Codemagic build page for download / inspection.
       - build/ios/ipa/*.ipa
-      - /tmp/xcodebuild_logs/*.log
-      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
-      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
 
     publishing:
-      # Upload the signed .ipa to App Store Connect -> TestFlight using the
-      # same integration that handled signing-file fetching above.
       app_store_connect:
         auth: integration
-        # Send the build to TestFlight beta review. Internal testers can
-        # install immediately after Apple finishes processing (~15-30 min).
-        # External testers require a one-time Beta App Review (24-48hr)
-        # for the very first build - subsequent builds skip the review.
         submit_to_testflight: true

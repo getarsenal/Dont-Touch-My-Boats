@@ -285,7 +285,13 @@
   /* ===== Build button ===== */
   #build-btn {
     position: absolute;
-    bottom: calc(env(safe-area-inset-bottom, 0) + 14px);
+    /* On Capacitor iOS, env(safe-area-inset-bottom) sometimes returns 0 even when
+       the home indicator IS present. The previous value (14px + env) was just
+       barely enough on Safari but got clipped in TestFlight builds. Bumping the
+       base offset to 30px ensures the button clears the home indicator even when
+       the env var reports 0. On devices WITHOUT a home indicator (older iPhones)
+       the env returns 0 and we get a slightly thicker bottom margin — acceptable. */
+    bottom: calc(env(safe-area-inset-bottom, 0) + 30px);
     left: 50%; transform: translateX(-50%);
     padding: 10px 22px;
     background: linear-gradient(180deg, rgba(74,93,35,0.85), rgba(42,58,20,0.92));
@@ -2769,7 +2775,12 @@
     z-index: 60;
     background: #050803;
     display: none;
-    padding: 20px 16px 16px 16px;
+    /* Top padding accounts for the iPhone dynamic island / notch. The 20px base is
+       a safety floor; safe-area-inset-top adds extra on devices with cutouts.
+       Previously this was just 20px which caused content to start UNDER the dynamic
+       island on TestFlight builds (Capacitor native uses viewport-fit=cover so the
+       browser chrome doesn't shield content like Safari does). */
+    padding: calc(env(safe-area-inset-top, 0px) + 20px) 16px calc(env(safe-area-inset-bottom, 0px) + 16px) 16px;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     background-image:
@@ -2819,7 +2830,11 @@
     right: 0;
     bottom: 0;
     z-index: 61;
-    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)) 16px;
+    /* Bottom padding: 12px base + safe-area + extra 16px for Capacitor iOS
+       where env(safe-area-inset-bottom) sometimes returns 0 even on devices
+       with a home indicator. The extra 16px ensures the button never gets
+       clipped under the home indicator zone. */
+    padding: 12px 16px calc(28px + env(safe-area-inset-bottom, 0px)) 16px;
     background: linear-gradient(
       to bottom,
       rgba(5, 8, 3, 0) 0%,
@@ -3226,7 +3241,7 @@
   @media (max-height: 600px) {
     .stick-zone { width: 110px; height: 110px; bottom: calc(env(safe-area-inset-bottom, 0) + 50px); }
     .stick-knob { width: 46px; height: 46px; margin: -23px 0 0 -23px; }
-    #build-btn { bottom: calc(env(safe-area-inset-bottom, 0) + 8px); padding: 8px 18px; font-size: 12px; }
+    #build-btn { bottom: calc(env(safe-area-inset-bottom, 0) + 24px); padding: 8px 18px; font-size: 12px; }
   }
 </style>
 </head>
@@ -4038,20 +4053,35 @@ class AudioEngine {
   // Fetch sample bytes early. Safe to call before init() — bytes are buffered, not decoded yet.
   // Retries on transient network failures (some hosts time out cold-start fetches).
   preloadSamples(urls) {
+    // ============ AUDIO LOAD DIAGNOSTICS ============
+    // Heavy logging here because audio is one of the most likely things to break
+    // on Capacitor iOS — relative URL resolution, iOS WKWebView decoding quirks,
+    // case-sensitive filesystem, missing files in the app bundle.
+    // Every load attempt + failure mode is logged so the diag CONSOLE tab tells
+    // us exactly what went wrong without needing to attach a debugger.
+    console.log(`[audio] preloadSamples called with ${Object.keys(urls).length} files`);
     Object.entries(urls).forEach(([name, url]) => {
+      console.log(`[audio] fetching ${name} from "${url}"`);
       this._fetchWithRetry(url, 3).then(ab => {
+        console.log(`[audio] fetched ${name}: ${(ab.byteLength / 1024).toFixed(1)} KB`);
         this._sampleArrayBuffers[name] = ab;
         // If AudioContext already exists (rare ordering), decode immediately
         if (this.ctx && !this._samples[name]) this._decodeOne(name);
       }).catch(err => {
-        console.warn(`Audio sample failed permanently: ${url}`, err);
+        // CRITICAL: this is the most likely failure path in production. If the
+        // user reports "no custom audio", check the diag console for these
+        // lines. Common reasons:
+        //   - 404: file not in www/ when cap sync ran (check git status of www/)
+        //   - HTTP error: wrong protocol scheme (Capacitor uses capacitor://)
+        //   - Network error: cap sync didn't include the file in app bundle
+        console.warn(`[audio] FETCH FAILED for ${name} at "${url}": ${err.message || err}`);
       });
     });
   }
 
   _fetchWithRetry(url, attempts) {
     return fetch(url)
-      .then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status} (${r.url})`)))
       .catch(err => {
         if (attempts <= 1) throw err;
         // Exponential-ish backoff: 300ms, 900ms, 2700ms
@@ -4064,10 +4094,16 @@ class AudioEngine {
 
   async _decodeOne(name) {
     const ab = this._sampleArrayBuffers[name];
-    if (!ab) return;
+    if (!ab) {
+      console.warn(`[audio] _decodeOne(${name}): no array buffer to decode`);
+      return;
+    }
     try {
       // .slice(0) clones — decodeAudioData detaches its input on some browsers
+      const t0 = performance.now();
       this._samples[name] = await this.ctx.decodeAudioData(ab.slice(0));
+      const dt = (performance.now() - t0).toFixed(0);
+      console.log(`[audio] decoded ${name} (${dt}ms, ${this._samples[name].duration.toFixed(1)}s)`);
       // If music was requested before this track decoded, fire it now with the
       // original opts (preserving the caller's intended gain, fade, loop settings)
       if (this._pendingMusicName === name) {
@@ -4077,7 +4113,10 @@ class AudioEngine {
         this.playMusic(name, opts);
       }
     } catch (e) {
-      console.warn(`Audio decode failed: ${name}`, e);
+      // iOS WKWebView's audio decoder is picky — MP3s with unusual sample rates,
+      // VBR encoding, or non-standard headers can fail silently. The error message
+      // is logged so we can correlate with which file is broken.
+      console.warn(`[audio] DECODE FAILED for ${name}: ${e.message || e}`);
     }
   }
 
